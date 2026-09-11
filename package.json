@@ -6,7 +6,8 @@
     "test": "node --test \"tests/unit/**/*.test.js\"",
     "test:e2e": "playwright test",
     "serve": "node tools/serve.mjs",
-    "seed": "python tools/build_seed.py"
+    "seed": "python tools/build_seed.py",
+    "verify:config": "node tools/verify-config.mjs"
   },
   "keywords": [],
   "author": "",

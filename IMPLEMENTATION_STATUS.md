@@ -9,6 +9,115 @@ or in the repository; nothing has connected to Microsoft 365; no production work
 
 ---
 
+## 2026-09-11 (later) — Entra app registration complete; site configured, not yet published
+
+Cody completed the app registration and supplied its identifiers. `site/js/config.js` now carries them. No
+workbook write has run, nothing has connected to Microsoft 365 from here, and the change is **committed locally
+but not pushed**, so the live page is still the test-mode one.
+
+### The registration, as reported
+| Setting | Value |
+|---|---|
+| Application (client) ID | `6c5bf2f8-a50c-4908-ba93-535816364785` |
+| Directory (tenant) ID | `ef5ad4e3-2b18-4542-8fd2-ed7212cbcc93` |
+| Platform and redirect | Single-page application, `https://tpahavp.github.io/tpaha-books/` |
+| Delegated permissions | `User.Read` and `Files.ReadWrite`, admin consent granted |
+| Assignment required | Yes, with all five intended accounts assigned |
+| Implicit grant / public client flows | unchecked / disabled |
+| Client secret | none, and there must never be one |
+
+Both ids are configuration rather than secrets, which is why they live in a file the site publishes: they
+identify the app and the organisation, while who may sign in and what they may open stays with Microsoft 365.
+
+### A problem this raised, and how it was solved
+Test mode was triggered by an empty `clientId`. Filling the id in would have taken the whole browser suite
+offline with the real registration and made local development impossible without editing the file back and
+forth. `site/js/config.js` now supplies the ids **only to the published host** and blanks them for
+`localhost` and `127.0.0.1`. The rule is the address the page was served from, not a flag or a query
+parameter, so nothing a member can click, type or paste can put the published site into test mode, and the
+tests keep running offline against the sample workbook.
+
+### Verification, none of it touching Microsoft
+`tools/verify-config.mjs` (new, `npm run verify:config`): **17 checks, all passing**. It checks that both ids
+are well-formed GUIDs matching the registration and differ from each other; that a page served from
+`localhost` or `127.0.0.1` gets no ids while the published host and a future custom domain get them; that the
+redirect URI the app derives from each of the four pages equals the registered SPA redirect exactly; that the
+scopes requested are exactly the two consented; that the authority is the single tenant rather than
+`/common`; that sign-in is redirect-based so no implicit grant is needed; that no client secret, certificate
+or private key exists anywhere in the published site; that no workbook is pinned, so a member must still
+identify and confirm one; and that the writer model is still single-writer.
+
+What it cannot do, stated plainly: it cannot prove the registration in Entra still matches these values, that
+consent is still granted, or that an assigned account can actually sign in. Those are Checkpoint 2 checks
+against the real service.
+
+- `npm test`: **131 passed, 0 failed**.
+- `npx playwright test`: **162 passed, 0 failed**, confirming local test mode survived the change.
+- `appVersion` bumped to `2026.09.11` so phones fetch the new files.
+
+### The decision this leaves with Cody
+Publishing this commit is the moment the live site stops being a test-mode page and becomes a real sign-in page
+that can read and write the chosen workbook. That is the intended next stage, but it should be a deliberate
+push rather than one that rides along with something else. After it, confirm that an assigned account reaches
+the site and an unassigned one is refused with Microsoft's "not assigned" message.
+
+### Still outstanding, unchanged
+`RefreshReports` has not been supplied, and the hidden-month-row decision is still open. Both are needed
+before the pilot, neither blocks publishing the configuration.
+
+---
+
+## 2026-09-11 — Hosting live; Entra app registration next
+
+No code changed for this entry. Nothing has connected to Microsoft 365; no live write has run.
+
+### Hosting (setup guide part A): done
+| | |
+|---|---|
+| Repository | `https://github.com/TPAHAVP/tpaha-books` (public, association-owned) |
+| Published commit | `b18dd2e`, one commit, 65 files. The ref GitHub holds matches the commit that passed the pre-upload scans, checked after the push |
+| Site address | `https://tpahavp.github.io/tpaha-books/` — this is the **redirect URI** for the app registration |
+| State when opened | **Test mode**, as intended: `clientId` in `site/js/config.js` is still empty, so there is no sign-in and no Microsoft 365 access from the published site |
+| Deployment | `.github/workflows/pages.yml` publishes the `site/` folder on every push to `main`; the documentation and tests are not served |
+
+### What preparing the upload turned up
+Scanning before the first push found three kinds of real information that would otherwise have been published,
+all now held back by `.gitignore` and still present on the treasurer's machine:
+
+1. **Real figures inside four test files.** `tests/unit/ledger-model.test.js` (9 tests),
+   `tests/unit/storage-model.test.js` (14), `tests/unit/xlsx-export.test.js` (3) and
+   `tests/e2e/storage.spec.js` (9) assert values read from the real workbooks, among them the closing balance,
+   the year net, a utility bill, the storage revenue and the space count. They need the git-ignored fixtures and
+   skip without them, so they are useless to a clone. A clone therefore runs a smaller suite than the figures
+   quoted in this report, and the difference is exactly those four files. `README.md` says so.
+2. **Real figures in the documents.** `docs/workbook-mapping.md` named the year net, real cheque numbers and the
+   transaction-number range; those are now described without the values. `docs/superpowers/`, the superseded
+   design material from the first approach, quoted several more and is excluded whole.
+3. **The worksheet-protection password's location.** The mapping and this report named the exact cell. They now
+   say only that it sits in a cell on the ENTRY sheet, with the location kept in the local note beside the
+   script source. One bare reference survived the first pass, was caught by review on commit `8944dfb`, and was
+   removed by amending before anything was pushed; `8944dfb` never reached GitHub.
+
+Also changed: a placeholder in `site/js/ui.js` that named the association's SharePoint host is now generic. The
+storage rates and space count shipped in `site/js/storage/model.js` were left alone: they are application
+defaults that any visitor to the storage page already sees, not workbook records.
+
+### Where Checkpoint 2 preparation stands
+| Prerequisite | State |
+|---|---|
+| A. Checkpoint 1 approved | done, 2026-09-08 |
+| B. The three Office Scripts read | done, 2026-09-10. **`RefreshReports` still outstanding** |
+| C. Writer arrangement and numbering policy | accepted, 2026-09-08 |
+| C2. Hidden month rows | **outstanding**: accept a documented manual refresh, or ask for an implementation change |
+| D. Hosting | **done, 2026-09-11** (above) |
+| D. Entra app registration, assignment, `config.js` | **next** (setup guide B–D). Codex is walking Cody through it |
+| E. A quiet test copy on the day | on the day |
+
+The live Diagnostics run and the separately authorised script-identity check follow once B, C2 and D are
+complete and Cody authorises them. Neither is authorised by any review so far.
+
+---
+
 ## 2026-09-10 (sign-off) — **V1 closed by independent review; Checkpoint 2 preparation continues**
 
 Sign-off read: `Desktop\Codex projets\excel to HTML idea\review-script-compatibility-signoff\SCRIPT_COMPATIBILITY_SIGNOFF.md`.

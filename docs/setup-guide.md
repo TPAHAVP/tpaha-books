@@ -52,16 +52,30 @@ Remember: sign-in permission and workbook permission are separate. A member also
 
 ## D. Configure the site
 
-Edit `site/js/config.js`:
+**Done on 2026-09-11.** `site/js/config.js` carries the Application (client) ID and the Directory (tenant) ID
+from part B. Both are identifiers, not secrets, which is why they sit in a file the site publishes; who may
+sign in and what they may open is still decided by Microsoft 365. There is no client secret and there must
+never be one.
 
-```js
-clientId: '<Application (client) ID>',
-tenantId: '<Directory (tenant) ID>',
-```
+One thing to understand before changing that file. The configuration hands those ids only to the **published
+host**; a page served from a developer's own machine (`localhost`, `127.0.0.1`) gets blank ids and therefore
+runs in test mode against the in-memory sample workbook. That is how the automated tests and local development
+stay offline. The rule is the address the page was served from, not a flag or a query parameter, so nothing a
+member can click, type or paste can put the real site into test mode.
+
+Run `npm run verify:config` after any change here. It checks the id formats, the host rule, the redirect URI
+the app actually derives, the scopes requested, and that no secret has crept into the site. It never contacts
+Microsoft.
 
 Leave `workbooks.ledger` blank for now: each member picks and confirms the workbook once (Diagnostics page or first open) and the choice is remembered in their browser, per account. Once the association has decided which workbook is the live one, its drive id and item id (shown on the Diagnostics page) can be pinned here so nobody has to choose.
 
-Commit and push. Pages redeploys within a couple of minutes. Change `appVersion` whenever you deploy so phones pick up the new files.
+Commit and push. Pages redeploys within a couple of minutes. Change `appVersion` whenever you deploy so phones
+pick up the new files; it is `2026.09.11` for this change.
+
+**What publishing this change does.** Until it is pushed, the live site is a harmless test-mode page. Once it
+is, the published site asks assigned members to sign in and can read and write the workbook they choose. That
+is the intended next stage, but pick the moment deliberately rather than letting it ride along with an
+unrelated push.
 
 ## E. The pilot workbook and the one-writer rule
 
