@@ -1,0 +1,23 @@
+{
+  "name": "tpaha-books",
+  "version": "1.0.0",
+  "description": "TPAHA Treasurer Ledger and Winter Storage web apps (OneDrive-backed)",
+  "scripts": {
+    "test": "node --test \"tests/unit/**/*.test.js\"",
+    "test:e2e": "playwright test",
+    "serve": "node tools/serve.mjs",
+    "seed": "python tools/build_seed.py"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "UNLICENSED",
+  "type": "module",
+  "devDependencies": {
+    "@playwright/test": "^1.63.0",
+    "playwright": "^1.63.0"
+  },
+  "dependencies": {
+    "@azure/msal-browser": "^5.21.0"
+  },
+  "private": true
+}

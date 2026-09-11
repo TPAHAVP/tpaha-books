@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en-CA">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#39584C">
+<title>Diagnostics · TPAHA Books</title>
+<link rel="icon" href="icons/icon-192.png">
+<link rel="stylesheet" href="css/app.css">
+<style>body { padding-bottom: 0; } .diag-log { font: 13px/1.4 ui-monospace, Menlo, Consolas, monospace; background: #f3f6f4; border-radius: 10px; padding: .75rem; max-height: 320px; overflow: auto; } .diag-log li.fail { color: var(--warn); font-weight: 600; } .diag-log li.ok::before { content: '✓ '; color: var(--ok); } .diag-log li.fail::before { content: '✗ '; }</style>
+</head>
+<body>
+<header class="app-header"><div><a href="index.html">TPAHA Books</a><h1>Diagnostics</h1></div><div id="diag-mode"></div></header>
+<main>
+  <section class="card">
+    <h2>1. Sign-in</h2>
+    <p id="signin-info" class="muted"></p>
+    <div id="signin-actions" class="row"></div>
+  </section>
+  <section class="card">
+    <h2>2. Identify the workbook <button type="button" id="btn-find" class="btn btn-sm btn-primary">Find</button></h2>
+    <p class="small muted">Lists .xlsx files named like the configured search term in your OneDrive, plus files shared with you. Confirm the exact name, folder and last-changed time before choosing.</p>
+    <div id="candidate-host" class="table-wrap"></div>
+    <div id="workbook-info" class="small" style="margin-top:.5rem"></div>
+  </section>
+  <section class="card">
+    <h2>3. Read-only checks</h2>
+    <p class="small muted">Nothing is written. Each check reads one part of the workbook.</p>
+    <div class="table-wrap"><table id="checks"><thead><tr><th>Check</th><th>Result</th><th>Detail</th></tr></thead><tbody></tbody></table></div>
+  </section>
+  <section class="card">
+    <h2>4. Prove access (test copy only)</h2>
+    <p class="small">Adds one row described <em>TPAHA Books connection test</em>, reads it back, deletes it, and confirms the workbook is back to its starting state. Run this only on the test copy. Type the workbook's name exactly as shown above to enable the button.</p>
+    <div class="row" style="align-items:center">
+      <label class="field">Workbook name <input type="text" id="confirm-name" autocomplete="off" style="min-width:18rem"></label>
+      <button type="button" id="btn-selftest" class="btn btn-danger" disabled>Run the connection test</button>
+    </div>
+    <p id="selftest-gate" class="small muted"></p>
+    <p id="selftest-result" class="status-line"></p>
+    <div id="selftest-compared" class="small"></div>
+    <ol id="selftest-log" class="diag-log"></ol>
+  </section>
+  <section class="card">
+    <h2>5. Request log <button type="button" id="btn-copy-log" class="btn btn-sm">Copy log</button></h2>
+    <p class="small muted">Method, path, status and timing of each Microsoft Graph call in this page. No records are included.</p>
+    <ol id="request-log" class="diag-log"></ol>
+  </section>
+  <p class="small muted">TPAHA Books <span id="app-version"></span></p>
+</main>
+<script src="vendor/msal-browser.min.js"></script>
+<script type="module" src="js/diagnostics.js"></script>
+</body>
+</html>

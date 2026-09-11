@@ -1,0 +1,18 @@
+node_modules/
+data/
+test-results/
+playwright-report/
+*.xlsx
+.nechoos/
+.sisyphus/
+specs/
+# Superseded design material from the first (JSON-store) approach. Kept locally: it quotes real figures
+# from the association's workbooks, so it is not published with the site's source.
+docs/superpowers/
+# Tests that assert figures read from the real workbooks. They need the git-ignored fixtures in data/ and skip
+# without them, so they are useless to a clone; keeping them out means the association's closing balance,
+# year net, utility bills, storage revenue and space count are not published.
+tests/unit/ledger-model.test.js
+tests/unit/storage-model.test.js
+tests/unit/xlsx-export.test.js
+tests/e2e/storage.spec.js

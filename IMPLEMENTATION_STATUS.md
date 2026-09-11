@@ -1,0 +1,462 @@
+# TPAHA Books — implementation status
+
+Working folder: `C:\Users\Cody\Desktop\Projects\excel to HTML idea` (the implementation Codex reviewed and
+the only one maintained). Another copy exists under `Desktop\Codex projets\excel to HTML idea`; it is not
+deleted, replaced or written to without Cody's instruction.
+
+Rules kept throughout: no passwords, tokens, client secrets, sharing links or real records in this file
+or in the repository; nothing has connected to Microsoft 365; no production workbook has been touched.
+
+---
+
+## 2026-09-10 (sign-off) — **V1 closed by independent review; Checkpoint 2 preparation continues**
+
+Sign-off read: `Desktop\Codex projets\excel to HTML idea\review-script-compatibility-signoff\SCRIPT_COMPATIBILITY_SIGNOFF.md`.
+
+> "The V1 sorting remediation is approved. No further blocking findings were identified in this follow-up.
+> Checkpoint 1 remains approved; hosting and Microsoft account preparation can proceed."
+
+No redesign of the sorting fix is requested.
+
+### Verified independently by the reviewer
+- One ordering rule, `expectedSortedRows()`, serves both the adapter's rebuild and `sortedTableMatches()` used
+  by Diagnostics. Correct same-day transactions pass after a correction moves their table positions; date-only
+  ordering is still rejected.
+- Their original V1 reproduction, rerun unchanged, passes.
+- `npm test` **131 passed, 0 failed, 0 skipped**; project browser suite **162 passed, 0 failed**; with their own
+  reproduction, **163 passed**. Their server ran on port 8801 against this folder. Two browser engines, no
+  physical phone.
+- **They read the saved script source** in `data/office-scripts/` and compared its helpers with the unit-test
+  ports. Their conclusion matches what is recorded in `docs/workbook-mapping.md` §7: the ports reflect the
+  originals for valid app-generated transactions; there is no timestamp-specific parser or matching rule in the
+  three scripts; whole-row comparisons do include the timestamp value, and the writing scripts rewrite it along
+  with the other cells. Retaining that source is what made this check possible.
+
+### Explicitly still not established
+Reading the source does not prove the live Office Scripts runtime preserves the exact nine-digit timestamp
+through a whole-table rewrite. The reviewer confirmed the runbook now separates that check from the ordinary
+Diagnostics self-test and marks it as awaiting authorisation, and that the hidden-row guidance no longer uses
+Submit or Delete to refresh a report. This sign-off closes a code finding. It does not authorise live writes or
+establish production readiness.
+
+### Remaining steps, in the reviewer's order
+1. Supply and review **RefreshReports** before the pilot.
+2. Decide how to handle hidden month rows. A manual refresh needs the reviewed refresh script confirmed to
+   reveal populated rows, and the resulting Excel view or printout checked. Automatic visibility updates would
+   be a separate change.
+3. Complete hosting and Microsoft sign-in and account setup (`docs/setup-guide.md` A–D).
+4. Once those are done **and Cody authorises the live checks**, run the test-copy Diagnostics sequence and the
+   separately documented script-identity check, and return the logs and the exact before and after identity
+   evidence for Checkpoint 2 review.
+
+---
+
+## 2026-09-10 (later) — Script-compatibility follow-up review: V1 fixed (closed by the sign-off above)
+
+Review read: `Desktop\Codex projets\excel to HTML idea\review-script-compatibility\SCRIPT_COMPATIBILITY_REVIEW.md`.
+The adapter's new date-then-number ordering was accepted; one missed consumer of the rule was found.
+
+| # | Finding | What changed | Regression evidence |
+|---|---|---|---|
+| V1 (P2) | The Diagnostics read-only check still sorted by date alone, keeping table position for ties, so after a correction it called the adapter's correct output inconsistent and disabled the connection test on valid data. The reverse was also true: the old order would have passed the check while the workbook's own scripts rejected it. | The ordering rule is now one exported function, `expectedSortedRows()`, with `sortedTableMatches()` beside it for the read-only comparison, both in `site/js/workbook/ledger-workbook.js`. The rebuild and the Diagnostics check call it, so they cannot drift apart again. Blank rows are handled in that one place. The check stays read-only and was not weakened; its label now names the required order. | Unit: "V1: one shared rule orders LOG_Sorted, so the rebuild and the read-only Diagnostics check cannot disagree" and "a row with no transaction number sorts last within its date and keeps table order". Browser (`tests/e2e/diagnostics.spec.js`): "Diagnostics accepts the date-then-number order the adapter writes, after a same-day correction" (all six checks pass, the test button enables) and "Diagnostics still rejects a helper table ordered by date alone, with the numbers reversed on one date". The reviewer's own reproduction, unchanged, now passes. |
+
+### Evidence corrections the review asked for
+- **The Diagnostics connection test never runs an Office Script.** Claims that it would prove a script's
+  whole-table rewrite preserves a nine-digit timestamp have been removed from the mapping, the status entry
+  above and the runbook. The unit test that exercises such a rewrite is renamed to say it covers the mock only.
+- **A changed identity is no longer described as failing loudly.** The app notices one only where it looks for
+  its own row by operation id; a rewrite between operations would look like a changed or missing record.
+- **A separate, separately authorised live identity check** is now written into
+  `docs/checkpoint-2-runbook.md`: save a labelled entry, record its exact Timestamp text, run the reviewed
+  script action with nothing in flight, re-read and compare. It is marked as authorised by nobody yet.
+- **Hidden month rows**: the guidance no longer says to press a script button to refresh visibility. It calls
+  for a documented manual refresh with a reviewed `RefreshReports`, verified in Excel first, or a separate
+  implementation change.
+- **The scripts' source is retained for review** in the git-ignored `data/office-scripts/` folder, so the
+  ports in the unit tests can be checked against the originals. It is kept out of source control because it
+  documents the workbook's internal structure, including where the sheet-protection password sits.
+
+### Tests run (2026-09-10, this folder)
+- `npm test`: **131 passed, 0 failed, 0 skipped**.
+- `npx playwright test`: **162 passed, 0 failed** = 54 per project × 3 projects.
+- The reviewer's V1 reproduction, unchanged: **1 passed**.
+
+### Still open for Cody
+`RefreshReports` has still not been supplied, and the hidden-month-row decision is still open. Hosting and
+account preparation can continue meanwhile.
+
+---
+
+## 2026-09-10 — The workbook's Office Scripts reviewed; one compatibility defect found and fixed
+
+Cody supplied the source of SubmitEntry, FindTransactions and DeleteTransaction (Checkpoint 2 prerequisite B).
+Findings and the resulting change are recorded in `docs/workbook-mapping.md` §7.
+
+| Question | Answer | Consequence |
+|---|---|---|
+| Do they read, compare or parse the Timestamp column? | **No.** SubmitEntry writes its own `new Date().toISOString()`; FindTransactions matches on Date only; DeleteTransaction matches on TransactionID plus the Date, Description and Amount shown on the form. | The nine-fraction-digit operation id is safe. The concern carried since review R4 is closed. |
+| Do they rewrite the column? | **Yes**, as part of a whole-table rewrite: `writeRows()` sets values over the entire body of both tables on every save and delete, with the values it just read. | Text round-trips, which is how today's three-digit timestamps survive. Whether the nine-digit form does the same is **not established for the real service**, and the ordinary connection test cannot establish it because it never runs an Office Script. A separately authorised live identity check is set out in the runbook. A changed identity should not be assumed to announce itself. |
+| Do they impose rules this app must satisfy? | **Yes, two.** `validateLog` rejects the whole workbook unless every row has a unique positive integer id, an integer date serial inside the workbook year, a valid type and category pairing, and an amount with at most two decimals. `verifySorted` rejects it unless LOG_Sorted equals LOG sorted by **date, then transaction number**, compared as whole rows. | Our entry validation already met `validateLog`. **`verifySorted` did not hold**: see the defect below. |
+| Does DeleteTransaction delete positionally? | It rewrites both tables wholesale rather than deleting one row by index. | Worse for concurrency, not better: a script can move every row at once. It reinforces the one-writer rule rather than changing it. |
+
+### Defect found and fixed (2026-09-10)
+`sortedTarget()` in `site/js/workbook/ledger-workbook.js` ordered LOG_Sorted by date and then **table
+position**; the scripts require date and then **transaction number**. The two agree while rows are only
+appended, and diverge as soon as this app corrects a row that shares a date with a higher-numbered one,
+because a correction moves that row to the end of LOG. The scripts would then have thrown "LOG and LOG_Sorted
+disagree. Run RefreshReports before entering or deleting transactions" and refused to run, until someone ran
+RefreshReports. Fixed by matching their tie-break. A row with no transaction number sorts last and keeps table
+order.
+
+### Regression evidence (3 new unit tests, ported from the scripts' own helpers)
+- "Office Scripts: LOG_Sorted keeps the order the scripts require (date, then transaction number), including
+  after a correction moves a row to the end of LOG" — builds exactly that divergence and asserts the scripts'
+  `verifySorted` accepts the result.
+- "Office Scripts: every row this app writes passes the scripts' own validateLog, after an add, a correction
+  and a delete" — a faithful port of `validateLog`/`validateEntry` run over the workbook the app leaves behind.
+- "Office Scripts: a nine-digit operation id survives the whole-table rewrite the scripts perform, and the app
+  still finds its row".
+
+### Tests run (2026-09-10, this folder)
+- `npm test`: **129 passed, 0 failed, 0 skipped** (126 before, plus the three above).
+- `npx playwright test`: **156 passed, 0 failed** across the three configurations. The sort change altered no
+  screen behaviour.
+
+### Two items now open for Cody
+1. **`RefreshReports`**: a fourth script, named in the other two scripts' error messages, whose source has not
+   been read. It presumably rebuilds LOG_Sorted and month-row visibility; if it writes LOG_Sorted it needs the
+   same review. Send it before the pilot.
+2. **Hidden month rows**: the scripts hide empty month-sheet rows and this app does not unhide them, so a
+   transaction added on the web can stay hidden when that month sheet is opened or printed in Excel until a
+   that month sheet is opened or printed in Excel. The web pages themselves are unaffected. Either accept it for
+   the pilot with a documented manual refresh using a reviewed `RefreshReports`, verified in Excel first, or ask
+   for the app to unhide rows, which would be a separate implementation change writing to protected sheets using
+   the password stored in a cell on the ENTRY sheet (named in the local notes). Not decided here. Pressing Submit or Delete to refresh visibility is not
+   an acceptable instruction.
+
+### Security note passed on, not caused by this app
+The worksheet-protection password is stored in plain text in a cell on the ENTRY sheet (named in the local notes) and read from there by
+`refreshMonthlyVisibility()`. Anyone who can open the workbook can read it. This app uses `ENTRY!B23` only and
+never touches that cell.
+
+---
+
+## 2026-09-08 (sign-off) — **Checkpoint 1 approved; Microsoft 365 verification pending**
+
+Codex sign-off read: `Desktop\Codex projets\excel to HTML idea\review-checkpoint-1-signoff\CHECKPOINT_1_SIGNOFF.md`.
+
+> "Checkpoint 1 is approved for the locally tested Treasurer Ledger implementation and its proposed
+> single-writer test-copy pilot. No further blocking findings were identified in this remediation review.
+> U1 is closed; the previously accepted T1–T4 fixes remain accepted."
+
+**What the approval does not cover**, in the reviewer's words and mine: it does not establish that the real
+Microsoft 365 connection works, does not approve production use, and does not approve simultaneous board
+editing. Graph sessions, permissions, real workbook formats and formulas, hosted sign-in, and behaviour on
+actual phones remain unverified. The browser guard and the operation queue coordinate one page in one
+browser; they do not coordinate an external Excel session, the old script buttons, another browser or
+another device, so the single-writer rule stands for the pilot. Winter Storage remains browser-only and
+awaits its own workbook connection and review.
+
+### Independently reproduced by the reviewer (their run, their server on port 8799)
+| Check | Result |
+|---|---|
+| `npm test` in this folder | 126 passed, 0 failed, 0 skipped |
+| Project browser suite | 156 passed, 0 failed |
+| The previously failing U1 reproduction, unchanged | 1 passed |
+| Combined browser run | 157 passed, 0 failed |
+| Overlapping-delete verification | passed |
+
+Browser configurations: desktop Chromium, iPhone-sized Chromium, iPhone-sized WebKit. Two engines, no
+physical device. Nothing connected to Microsoft 365; no live write was performed by the reviewer or here.
+
+### Review history closed by this sign-off
+| Pass | Findings | Outcome |
+|---|---|---|
+| Checkpoint 1 review (2026-09-06/07) | R1–R6 | fixed, accepted |
+| Re-review (2026-09-07) | S1–S4 | fixed, accepted |
+| Round 3 (2026-09-07) | T1–T4 | fixed, accepted |
+| Round 4 (2026-09-08) | U1 | fixed, closed |
+| Sign-off (2026-09-08) | none | **Checkpoint 1 approved** |
+
+### Checkpoint 2 preparation: state of play
+`docs/checkpoint-2-runbook.md` (new) is the single page to follow on the day: five prerequisites, the run
+itself, what to send back, the stop conditions, and what the test does and does not establish.
+
+| Prerequisite | Owner | State |
+|---|---|---|
+| A. Checkpoint 1 approved | — | **done** (this entry) |
+| B. The three Office Scripts read for Timestamp handling | Cody (owner account) | **done**, 2026-09-10 (see the entry above): none of them reads the Timestamp column; one compatibility defect found and fixed. `RefreshReports` still to send |
+| C. Writer arrangement and numbering policy accepted | Cody / the board | **done**, 2026-09-08 (below) |
+| D. Hosting, app registration, assignment, `config.js` filled in | Cody | **outstanding**; `docs/setup-guide.md` A–D. No password, token or client secret is ever supplied to the developer |
+| E. The test copy quiet during the run | Cody | on the day |
+
+Nothing in the code changes for Checkpoint 2: the accepted fixes are not being redesigned. `config.js` still
+carries an empty `clientId`, which is what keeps every page in test mode until step D fills it in.
+
+### Decisions taken by Cody, 2026-09-08
+- **Writer arrangement: one writer at a time**, as built and reviewed. One designated tester works at a time
+  on the test copy; nobody edits the workbook in Excel or runs its script buttons meanwhile. The site enforces
+  what a browser can see (banner, a confirmation before the first Correct or Delete, refusal to write from a
+  second tab, one complete operation at a time) and nothing beyond that. No code change; `config.pilot.writerModel`
+  stays `'single'`. Simultaneous board editing remains unsupported and unapproved.
+- **Transaction numbering: keep highest existing number plus one**, with its consequence accepted: deleting the
+  highest-numbered transaction frees that number for a later entry. Numbers stay unique at any moment; when two
+  members add at the same instant the later row is renumbered to the next free number and the member is told.
+  Existing entries are never renumbered by a correction. No code change; the member guide already states this.
+
+---
+
+## 2026-09-08 (later) — Checkpoint 1 round-4 remediation (U1), returned for sign-off
+
+Review read: `Desktop\Codex projets\excel to HTML idea\review-checkpoint-1-round4\CHECKPOINT_1_REVIEW_ROUND4.md`
+("T1–T4 are resolved in the reviewed paths. One remaining correction-recovery fix is required before closing
+Checkpoint 1."). Implemented and tested locally against the in-memory Graph replica. **Nothing has been
+verified against Microsoft 365**; no live write, no production connection.
+
+| # | Finding | What changed | Class | Regression evidence (all passing) |
+|---|---|---|---|---|
+| U1 (P2) | A correction that saved while the member kept typing stored the newer draft together with the **old** row reference, so after a reload the newer text hit a false "Someone else changed this record"; the offered Reload record action then discarded that text | `afterEditSave()` persists the combined record **immediately after** `state.editingRef` becomes the saved row, in the unsaved branch as well as the saved one, so the stored reference always names the version that actually reached the workbook. The same path serves a pending attempt found to have landed (`inspect` → `resume`), because both end in `afterEditSave()`. The fingerprint conflict check is untouched: an external change is still reported. `reloadEditedRecord()` no longer replaces typed text silently: when the reloaded row differs from what is on screen it shows both versions and offers **Keep what I typed** (the reference moves to the row just read and shown, the text stays unsaved), **Use the workbook version**, or **Cancel**. | Prevented | Browser (`tests/e2e/round4.spec.js`, 4 tests): "text typed while a correction saves is stored with the SAVED row as its reference; after a reload it saves without a false conflict" (persisted reference `First correction saved`, zero writes on startup, one copy of #2 carrying the newer text, every unrelated row byte-identical); "an unconfirmed correction that landed is finished after a reload, and newer text then saves against the finished row"; "a real conflict is still reported, and Reload record asks before replacing typed text; keeping it saves onto the row just read"; "Reload record can also replace the typed text with the workbook version, on purpose". The reviewer's own `reviewer.spec.mjs`, which failed before, now passes and logs the corrected reference. |
+
+### Evidence label corrected (asked for by the review)
+The round-3 test titled "a pending (unconfirmed) correction is still persisted after an unrelated entry Save
+succeeds" never performed an entry Save. It is renamed to what it covers: "a pending (unconfirmed) correction
+survives a reload and a cancelled discard, and stays persisted". The claimed sequence is no longer reachable
+through the UI, and the test file says so: since T1 the page refuses a second write while one is running, and a
+pending correction keeps its modal dialog open, so an entry Save cannot overlap it. The composition of a saved
+entry with a pending correction is proven by the unit test "T4: combineDrafts keeps each form part on its own".
+
+### Tests run (2026-09-08, this folder)
+- `npm test`: **126 passed, 0 failed, 0 skipped**.
+- `npx playwright test`: **156 passed, 0 failed** = 52 per project × 3 projects (desktop Chromium,
+  iPhone-13-size Chromium, iPhone-13-size WebKit): ledger 13, review regressions 12, round 3 7, round 4 4,
+  diagnostics 4, launcher 3, storage 9. Two engines emulated; no physical device.
+- Reviewer artifacts rerun: `reviewer.spec.mjs` (U1) **passes**, printing `Persisted reference after earlier
+  save: First correction saved`; `verify-overlapping-deletes.mjs` (T1) passes, every other row preserved exactly.
+
+### Unchanged
+Still mocked / unverified live (Graph behaviour, formats, sessions, throttling, the online copy's layout, the
+old Office Scripts' handling of the Timestamp column, a real iPhone, the hosted MSAL redirect); no live writes.
+The writer-model and transaction-number decisions remain Cody's: the recommendation is turn-taking for the
+pilot, with clear notification when a saved transaction receives the next available number, and the explicit
+note that max-plus-one can reuse the former highest number after a deletion.
+
+### Requires Cody
+1. **Sign-off review** of: `site/js/ledger/app.js` (`afterEditSave`, `reloadEditedRecord`, `reloadChoiceDialog`),
+   `tests/e2e/round4.spec.js`, the renamed round-3 test, `docs/member-guide.md`.
+2. Decisions: writer model; transaction-number policy.
+3. Before any live write: the three Office Scripts' source for Timestamp compatibility; a quiet test copy;
+   Microsoft account and hosting setup (setup guide A–D). Account and hosting preparation may proceed now; the
+   live write test is not authorised by any review so far.
+
+---
+
+## 2026-09-08 — Checkpoint 1 round-3 remediation (T1–T4), returned for re-review
+
+Review read: `Desktop\Codex projets\excel to HTML idea\review-checkpoint-1-round3\CHECKPOINT_1_REVIEW_ROUND3.md`
+(verdict "changes required before approving the live-write pilot"). Implemented and tested locally against
+the in-memory Graph replica. **Nothing has been verified against Microsoft 365**; no live write, no production
+connection.
+
+| # | Finding | What changed | Class | Regression evidence (all passing) |
+|---|---|---|---|---|
+| T1 (P1) | One person in one tab could overlap two deletes; both planned their positional DELETE from the same stale layout and an unrelated row (#4) was lost | The adapter now runs **one complete operation at a time**: every public operation (add, correction, delete, inspect, finish, balance write, repairs, sorted rebuild, load, resolution check) is queued behind the previous one and starts only after its verification and helper-table work; internal helpers never re-enter the queue, so nothing deadlocks; a queued operation re-checks the pause when it starts. The page refuses a second Save, Delete or repair while one runs ("Another change is still being saved…"), greys the Delete buttons, and lets typing continue. The connection test refuses to overlap itself, and Diagnostics refuses to change the workbook while it runs. This serialises one page only; the one-writer rule for other tabs, devices, Excel and scripts stands. | Prevented (within one page) | Unit: "T1: two deletes confirmed from one page at once are serialised … only the two intended rows disappear"; "T1: mixed overlapping operations (add, correction, delete) … every unrelated row survives"; "T1: a queued operation re-checks the pause … the connection test refuses to overlap itself". Browser (`tests/e2e/round3.spec.js`): "T1: a second Delete confirmed while the first is still reading is refused; … #3, #4 survive"; "T1: Save is refused while another change is running, and typing stays possible". Reviewer reproduction rerun (`Promise.allSettled` of two deletes): both fulfilled, remaining `[1,4,5,…,13]`, #4 present, no incident. |
+| T2 (P2) | Diagnostics ignored the tab guard, so the ledger and Diagnostics could both write in one browser | Diagnostics joins the same tab guard (same channel). The first TPAHA Books tab opened in a browser, whichever page, owns writing; in any other tab Diagnostics keeps its read-only checks but the write test is disabled **and** its handler refuses even a forced click; the ledger already refused. Browsers without BroadcastChannel are told the page cannot detect other tabs. | Prevented (same browser) | Browser: "T2: with the ledger open first, Diagnostics in a second tab keeps its read-only checks but refuses the write test, even when forced" (zero writes); "T2: with Diagnostics open first, the ledger in a second tab is the one that refuses to write". |
+| T3 (P2) | The ledger's Save never received the nine-digit id generator; it used millisecond timestamps, so two identical saves at one clock value merged | The entry controller is given `makeMarker` explicitly, and the controller's default is now the same safe generator (`defaultMarker`), so no caller can fall back to a bare timestamp. One pending attempt keeps its id; each new operation gets a fresh one; payload collision checks unchanged. | Prevented | Unit: "T3: the default operation id is ISO 8601 with nine fraction digits and differs even when the clock does not move" (frozen `Date`); "T3: one pending attempt keeps its marker across retries, and each distinct new operation gets a fresh one". Browser: "T3: with the wall clock frozen, two distinct identical Saves create two rows with distinct nine-digit operation ids, and a retried lost attempt still makes one row" (asserts the id the real Save button wrote: `2026-09-07T12:00:00.000dddddd Z`). |
+| T4 (P2) | A successful entry Save cleared the whole draft record, erasing a separate correction's persisted draft | Persistence is a single combined record computed by `combineDrafts()` in `drafts.js`; every success, reset and cancel path re-persists through it and no form ever clears the record directly. A saved entry drops only its own part; a typed or pending correction stays. | Prevented | Unit: "T4: combineDrafts keeps each form part on its own: a saved entry does not erase a typed or pending correction". Browser: "T4: a correction typed while an entry is saving stays persisted after the entry succeeds, and reopens with its exact text after a reload"; "T4: a pending (unconfirmed) correction is still persisted after an unrelated entry Save succeeds". |
+
+### Tests run (2026-09-08, this folder)
+- `npm test`: **126 passed, 0 failed** (ledger adapter 35, save controller 16, drafts 6, incidents + tab guard 3, Graph client 12, mock 10, concurrency 5, locator 4, store 3, storage model 14, ledger model 9, UI 6, export 3).
+- `npx playwright test`: **144 passed, 0 failed** = 48 per project × 3 projects (desktop Chromium, iPhone-13-size Chromium, iPhone-13-size WebKit): ledger 13, review regressions 12, round 3 7, diagnostics 4, launcher 3, storage 9. Two engines emulated; no physical device.
+- Round-3 reviewer reproduction (`reproductions.mjs` shape) rerun: safe outcome (above). The four reviewer browser demonstrations assert the defects; their safe counterparts are the seven tests in `tests/e2e/round3.spec.js`.
+
+### Unchanged from the previous entry
+Still mocked / unverified live (Graph behaviour, formats, sessions, throttling, the online copy's layout, the
+old Office Scripts' handling of the Timestamp column, a real iPhone, the hosted MSAL redirect); no live writes;
+the writer-model and transaction-number decisions remain Cody's (recommendation: turn-taking for the pilot,
+clear notification when a saved transaction receives the next available number, and the explicit note that
+max-plus-one can reuse the former highest number after a deletion).
+
+### Requires Cody
+1. **Re-review** of: `site/js/workbook/ledger-workbook.js` (operation queue), `site/js/save/save-controller.js`
+   (`defaultMarker`), `site/js/save/drafts.js` (`combineDrafts`), `site/js/ledger/app.js`, `site/js/diagnostics.js`,
+   `tests/unit/{ledger-workbook,save-controller,drafts}.test.js`, `tests/e2e/round3.spec.js`, `docs/workbook-mapping.md`
+   §3/§3b, `docs/member-guide.md`, `docs/setup-guide.md` E, `README.md`.
+2. Decisions: writer model; transaction-number policy (both unchanged, see the previous entry).
+3. Before any live write: the three Office Scripts' source for Timestamp compatibility; a quiet test copy;
+   Microsoft account and hosting setup (setup guide A–D).
+
+---
+
+## 2026-09-07 (later) — Checkpoint 1 re-review remediation (S1–S4), returned for re-review
+
+Review read: `Desktop\Codex projets\excel to HTML idea\review-checkpoint-1-rereview\CHECKPOINT_1_REREVIEW.md`
+(verdict "changes required"). Everything below was implemented and tested locally against the in-memory
+Graph replica. **Nothing has been verified against Microsoft 365.** The live write self-test was not run and
+no production records were connected.
+
+### Vocabulary used from here on (as the re-review asked)
+- **Prevented**: the app saw the danger before sending a request and sent nothing harmful.
+- **Detected**: the app found afterwards, by row identity, that a request hit the wrong row; the damage is
+  named and saving is paused. **Detection is not preservation**: the row is gone until a member restores it.
+- **Resolved**: the app re-read the table and every documented condition for that incident held (verified),
+  or nothing could be verified and a member acknowledged after checking Excel's version history.
+- **Unverified live behaviour**: everything about the real Microsoft 365 service.
+
+### Finding-by-finding
+
+| # | Finding (P1) | What changed | Class | Regression evidence (all passing) |
+|---|---|---|---|---|
+| S1 | Wrong-row deletion remained; the batch GET was not evaluated before the DELETE; reporting is not preserving | The read+delete `$batch` is withdrawn. Every positional request (DELETE of a row, PATCH that renumbers a row) is now preceded by a **fresh read that is evaluated first**: the row at the index must be exactly the intended one (identity and content); if it moved, the app re-reads and re-aims (three rounds), if it is gone it stops. The residual race (a shift in the instant between that read and the request) is **detected**, named, paused, never repaired by guessing. **Writer model**: `config.pilot.writerModel = 'single'`: a banner on every ledger screen, a confirmation before the first Correct/Delete of a session, refusal to write from a second tab of the same browser, and documentation that simultaneous editing is not supported. The three ways beyond one writer are presented below for Cody's decision, not chosen. | Shift before the read: **prevented**. Shift after the read: **detected** only. | Unit: "S1: another member deletes #2 just before our check … every other transaction survives"; "S1: a correction whose old copy moved just before the check … every transaction survives"; "S1: renumbering re-reads before the positional PATCH … no historical row renumbered"; residual race tests renamed to say "detected … never repaired by guessing" and extended with verified resolution. Browser: "pilot writer model" ×2. Re-review reproduction rerun (shift injected at the DELETE itself): still detected, #3 still lost, reported as such, not as preserved. |
+| S2 | A newer draft was erased on reload when an older save had landed | `restorePending` no longer touches the current draft or its generation; `_landed` declares the draft saved only when its content equals the payload that landed. A newer draft stays on screen, persisted and unsaved, and becomes its own operation on the next Save. Test mode now keeps the in-memory workbook in `sessionStorage`, so browser tests reload against the same workbook state, as the re-review asked. | Prevented | Unit: "S2: a restored pending operation and a NEWER draft …", "S2: the same payload restored after a reload …", "S2: … keeps the newer edits unsaved even if the generation happens to match". Browser: "S2: a newer draft survives a reload when the older attempt had landed: startup checking writes nothing, the newer text stays unsaved, and each version is saved once". Re-review reproduction rerun: `state=unsaved`, draft "Later unsaved version" kept. |
+| S3 | "Check workbook" performed writes (formats, renumber, sorted table, old-copy delete), including on automatic recovery | The controller now has two callbacks: `inspect` (read-only) used by `check()` and by the automatic check after a reload, and `resume` (may finish) used only by a Save. The adapter gained `inspectAppend` and `inspectCorrection`, which issue GETs only and return `missing` / `landed` / `incomplete` (with the unfinished steps) / `conflict`. An incomplete operation is shown as "Not finished: … press Save to finish"; the Save button reads "Finish saving". | Prevented | Unit: "S3: check() is read-only …", "S3: Save after an incomplete check finishes the operation through resume, once", "S3: inspectAppend and inspectCorrection issue only GETs …", "S3: with the SaveController, Check after a failed correction only reads …" (asserts zero non-GET requests). Browser: "S3: Check workbook only reads …" and the S2 test assert zero writes since page load until Save. Re-review reproduction rerun: `mutations during check = 0`. |
+| S4 | Refresh (and `load()`) removed the pause without resolving anything; incidents were not persisted; correction recovery state was not persisted | `load()` never clears the pause. An **incident** record (kind, message, details, checks) is kept in the browser per tenant/account/workbook and re-armed on reload. `verifyResolution()` (read-only) evaluates documented conditions per kind (no identity twice; named row present once; corrected record has one copy; operation id once; number used once; renumbered row has its number back) and lifts the pause only when all hold; `acknowledgeIncident()` is allowed only when a condition is unverifiable and refused while any fails. `load()` also scans for duplicate identities already in the table (pasted in Excel or left by another device) and pauses (`integrity`), except for this page's own known unfinished correction. Unfinished corrections (record, change, id) are persisted and reopened after a reload with a read-only check. The band shows the checks (OK / Not yet / Cannot tell), keeps "Refresh (stays paused)", and offers Dismiss only once resolved. | Prevented (state loss); resolution verified | Unit: "R4/S4: … load() does not lift the pause, a verified explicit repair does", "S4: load() pauses on duplicate copies already in the workbook …", "S4: acknowledgement is refused while a check fails …", plus the extended residual-race tests. Browser: "S1/S4: … Refresh and a page reload keep the pause; only a verified explicit restore lifts it", "S4: duplicate copies already in the workbook pause saving on load …", "S4: an unconfirmed correction survives a reload …". Re-review reproduction rerun: `paused after load = true`, `verifyResolution.resolved = false` with the three failing checks listed. |
+
+### Also changed in this pass
+- **Timestamp / operation id format** changed from `ISO#random` to **ISO 8601 with nine fraction digits**
+  (`2026-09-06T14:03:11.482913057Z`), which still parses with `new Date()`; the re-review's compatibility
+  concern about the old Office Scripts is narrowed to "do they parse or compare this column?", listed as a
+  pre-live check for Cody in the setup guide (F). Their source is not in the file; nothing was changed in it.
+- `removeCopy(…, { allowIdentical: true })` removes exactly one of several identical copies and proves the
+  count afterwards (needed to resolve an `integrity` incident from a pasted duplicate).
+- Mock: `exportState`/`importState`/`onChange` for test-mode persistence across a reload.
+- Drafts schema 3: `{ entry, pending, correction }`.
+
+### The writer-model decision (for Cody)
+Simultaneous editing of the transaction table cannot be made safe from a browser: Graph has no lock,
+conditional write or transaction, and deletes/renumbering are positional. The pilot is therefore
+**single-writer, on the test copy**, enforced where a page can (banner, per-session confirmation before the
+first Correct/Delete, second-tab refusal) and by agreement where it cannot (other devices, Excel, the old
+buttons). Options beyond that, each with its remaining risk:
+1. **Turn-taking by agreement (current).** Risk: a broken agreement can still produce a detected-only
+   incident; recovery of a row changed by someone else in that instant needs Excel version history.
+2. **One path for every change**: remove the three buttons, lock `LOG`, and add a serialising backend for
+   the app. Risk: a real backend to host and secure; direct Excel edits by the treasurer would also have to
+   stop or go through it; it does not help until *all* other writers are removed.
+3. **Workbook redesign without positional operations**: a status column marks voided rows; corrections and
+   deletes become appends plus single-cell writes located by identity; month and annual formulas exclude
+   voided rows. Risk: a workbook change needing the treasurer's approval and re-verification of 550+
+   formulas; the single-cell write is still positional but its misdirection would void the wrong row
+   reversibly rather than delete it.
+The recommendation is option 1 for the pilot and a decision on 2 or 3 only if the pilot shows turn-taking
+is impractical.
+
+### Tests run (2026-09-07, this folder)
+- `npm test`: **120 passed, 0 failed** (Graph client 12, mock 10, ledger adapter 32, concurrency 5, save
+  controller 14, incidents + tab guard 3, drafts 5, locator 4, store 3, storage model 14, ledger model 9,
+  UI 6, export 3; the fixture-dependent formula-oracle tests ran because the git-ignored fixtures are present).
+- `npx playwright test`: **123 passed, 0 failed** = 41 per project × 3 projects (desktop Chromium,
+  iPhone-13-size Chromium, iPhone-13-size WebKit): ledger 13, review regressions 12, diagnostics 4,
+  launcher 3, storage 9.
+- Re-review reproductions (`review-checkpoint-1-rereview/reproductions.mjs`, adapted to the current
+  API because `verify` was split into `inspect`/`resume`): S2 and S3 no longer reproduce; S4 no longer
+  reproduces (the pause survives `load()`); S1 with the shift injected at the DELETE itself still loses the
+  row and is reported as **detected, not prevented**; with the shift injected before the check read,
+  every row is preserved.
+- The reviewer's browser demonstration (draft loss after a persisted append and reload) has its safe
+  counterpart in `tests/e2e/review-regressions.spec.js` ("S2 …"), using the persisted test-mode workbook.
+
+### Still mocked, not verified against Microsoft 365
+- Whether a table read immediately followed by a row DELETE behaves as modelled (no reordering inside the
+  service), `rows/itemAt(index=n)/range` PATCH, number-format inheritance on appended rows, session
+  lifetime, throttling, how quickly a read reflects another writer's change, the Annual and month sheet
+  layouts of the online copy, the real Timestamp values.
+- Whether the old Office Scripts tolerate nine-digit timestamps (pre-live check for Cody).
+- A real iPhone (WebKit emulation is not iOS Safari), the MSAL redirect on the hosted address, GitHub Pages.
+
+### Not started
+Live verification (needs the app registration), single-tester pilot on the test copy, winter-storage
+adapter (Phase 4), year rollover (excluded until saving is proven).
+
+### Changes made to any real workbook
+None. Nothing has connected to Microsoft 365.
+
+### Requires Cody
+1. **Checkpoint 1 re-review** of: `docs/workbook-mapping.md` (§2 Timestamp, §3, §3b), `docs/member-guide.md`,
+   `docs/setup-guide.md` (E, F), `README.md`, `site/js/config.js` (pilot), `site/js/workbook/ledger-workbook.js`,
+   `site/js/save/save-controller.js`, `site/js/save/incidents.js`, `site/js/save/tab-guard.js`,
+   `site/js/ledger/app.js`, `tests/unit/{save-controller,ledger-workbook,concurrency,incidents,mock-excel}.test.js`,
+   `tests/e2e/review-regressions.spec.js`, `tests/e2e/ledger.spec.js`.
+2. Decision: the writer model (option 1 recommended for the pilot).
+3. Decision (still open): transaction-number behaviour (max + 1; only a just-added row is renumbered).
+4. Before the live write test: check what the three Office Scripts do with the Timestamp column (setup guide F).
+5. Only after re-review: hosting account, app registration, assignment (setup guide A–C), then Diagnostics on
+   the test copy with one writer (Checkpoint 2).
+
+---
+
+## 2026-09-07 — Checkpoint 1 review remediation (R1–R6)
+
+Reviewed by Codex the same day ("changes required", S1–S4 above). Statements below that the re-review showed
+to be wrong or overstated are marked **[corrected]**.
+
+| # | Finding (P1) | What changed | Status after the re-review |
+|---|---|---|---|
+| R1 | A correction could destroy a different transaction and falsely claim it was restored | Correction became append + verified delete with identity-based assessment and no restoration. **[corrected]** The read+delete batch did not evaluate the read before the DELETE; the earlier claim "no longer reproduces" was an overstatement, since the reviewer's shape still lost the row. Now: prevented when the shift precedes the check read; detected (not prevented) when it falls between the read and the request; incidents verified before saving resumes. |
+| R2 | Deleting one transaction duplicated another member's legitimate correction | Identity-based assessment; other rows are never "restored" from stale values. Unchanged; still passing. |
+| R3 | The ordinary Save duplicated an append after a lost response | Pending operation recorded before the write; every Save/Retry resumes under the same marker. Unchanged, plus S3's read-only check. |
+| R4 | A timestamp collision silently lost a different member's append | Unique operation id; collision refused. Format changed again (ISO with nine fraction digits) for script compatibility. |
+| R5 | The client automatically retried correction writes | Only GET retried. Unchanged; still passing. |
+| R6 | Later correction edits were hidden and stopped counting as unsaved | Dialog stays open unless the controller ends `saved`; later saves target the corrected copy. Unchanged; corrections' pending state now also persisted (S4). |
+
+Other items from that pass that still hold: `completeCorrection`, the paused band (now incident-based),
+the Annual cross-check, Diagnostics gating and compared/not-compared lists, the concurrency tests with two
+adapters on one mock, the documentation corrections listed in the previous version of this entry.
+
+---
+
+## 2026-09-06 — Milestone 1: workbook mapping, Graph adapter, ledger screen on the workbook (Checkpoint 1)
+
+Reviewed by Codex on 2026-09-06/07: "Changes required" (R1–R6). Statements below that the reviews showed
+to be wrong are marked **[corrected]** and superseded by the entries above.
+
+### Completed (implemented and tested locally against an in-memory replica; nothing yet against Microsoft 365)
+- **Workbook mapping** `docs/workbook-mapping.md`: sheets, tables, columns, cell formats, website action → Graph
+  operation, verification for each, findings. Read-only inspection of the local copy with openpyxl.
+- **Graph Excel client** `site/js/workbook/excel-client.js`: persistent session, 202 long-running session
+  creation, strictly sequential requests, Microsoft's second-level error codes, `Retry-After`, session
+  re-creation. **[corrected]** the original retried some writes (R5); now only GET is retried. `$batch` is
+  implemented and tested but no longer used by the adapter.
+- **In-memory workbook mock** `site/js/workbook/mock-excel.js`: answers the same URLs, mirrors the month and
+  annual sheet formulas, refuses writes to formula cells and outside table bodies, injects failures.
+- **Ledger adapter** `site/js/workbook/ledger-workbook.js`. **[corrected]** twice; see the entries above.
+- **Save workflow** `site/js/save/save-controller.js` and `site/js/save/drafts.js`. **[corrected]** twice (R3, S2/S3).
+- **Ledger screen** `site/ledger.html`, `site/js/ledger/app.js`. **[corrected]** the Annual cross-check was missing;
+  the Correct dialog hid later edits (R6); Refresh lifted the pause (S4).
+- **Diagnostics page**: sign-in status, identify workbook, six read-only checks, self-test gated by the checks
+  passing and by typing the workbook name; compared / not-compared lists.
+- **Removed**: the JSON-file OneDrive store and its Graph file backend, the ledger's generated Excel/CSV
+  export, JSON import/export. `site/js/store.js` is a browser-only cache for the storage screen.
+- **Fixtures**: everything derived from the real workbooks lives in git-ignored `data/fixtures/`; tests that
+  need them skip when absent; client, mock and adapter tests use a synthetic sample.
+
+### Status of the five earlier defects (from the 2026-09-06 directive)
+| # | Finding | Status |
+|---|---|---|
+| 1 | Lost edit while another save uploads | Fixed: `SaveController` ignores a second submit while saving, keeps later edits, ends in `unsaved` if anything changed during the save. |
+| 2 | Storage conflict picks a whole record by timestamp | Ledger: per-row fingerprint check with a conflict dialog. Storage screen: the merge path is gone; its future adapter will use the same approach. |
+| 3 | Sign-out clears data without protecting unsaved edits | Fixed: `requestSignOut` asks first (also when an incident is paused); drafts cleared only for the signing-out account. |
+| 4 | Cache keys ignore account/tenant/workbook | Fixed: `draftKey`/`incidentKey` include tenant, account and workbook; workbook choice remembered per app + tenant + account. |
+| 5 | Mocks do not prove cloud correctness | Still true: the mock speaks Graph's HTTP surface so the real client and adapter are exercised, but **cloud correctness is unproven** until the Diagnostics self-test runs on the real copy (Checkpoint 2). |
+
+### Exact workbook operations implemented (all via Graph v1.0, inside one session, sequential)
+`GET /drives/{d}/items/{i}` (metadata) · `POST …/workbook/createSession` / `closeSession` ·
+`GET …/worksheets/{s}/range(address=…)` · `PATCH …/worksheets/{s}/range(address=…)` (values, numberFormat) ·
+`GET …/tables/{t}/dataBodyRange` · `POST …/tables/{t}/rows/add` · `DELETE …/tables/{t}/rows/{n}` ·
+`GET/PATCH …/tables/{t}/rows/itemAt(index=n)/range`. `POST /$batch` and `POST …/application/calculate` exist
+in the client and are **not called**. Sheets written: `LOG` (table rows), `LOG_Sorted` (table rows),
+`ENTRY!B23`. Nothing else is ever written.
+
+### Known problems, limitations, open questions
+- **Concurrency**: see §3b of the mapping and the writer-model decision above.
+- **`LOG_Sorted` dependency**: the month sheets are only right after the sorted helper table is rebuilt; the
+  adapter rebuilds it after every change against a fresh LOG read and Diagnostics checks its consistency.
+- **Month sheets show at most 30 rows** (workbook design); the screen shows all rows and warns.
+- **Number formats on appended rows**: set explicitly by the adapter, single attempt; to be confirmed live.
+- Workbook identity and content of the **online** copy unverified.
+- The Winter Storage screen still shows the earlier browser-only behaviour, clearly labelled as not connected.
+
+---
+
+## 2026-09-06 (earlier) — Milestone 0: assessment
+Superseded by Milestone 1; kept for the record: assessment, workbook re-inspection, Graph documentation
+verification, mapping and plan written.

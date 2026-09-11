@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en-CA">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#39584C">
+<title>TPAHA Books</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="icon" href="icons/icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="stylesheet" href="css/app.css">
+<style>body { padding-bottom: 0; } .launcher p.lead { color: var(--muted); }</style>
+</head>
+<body>
+<header class="app-header"><h1>TPAHA Books</h1><div id="account-status" aria-live="polite"></div></header>
+<main>
+  <div class="launcher">
+    <p class="lead">The Pas Agricultural &amp; Horse Association tools. Works on phones, tablets and computers. Add this page to your home screen for one-tap access.</p>
+    <a class="app-link" href="ledger.html">
+      <h2>Treasurer Ledger</h2>
+      <p>Add, correct and delete transactions in the association's Excel workbook, and see its monthly sheets and annual summary.</p>
+    </a>
+    <a class="app-link" href="storage.html">
+      <h2>Winter Storage</h2>
+      <p>Arena storage map with fees and size checks, storage swap, reserve list, and the 11 x 17 printable sheet. Not yet connected to its workbook.</p>
+    </a>
+    <div id="signin-card"></div>
+    <p class="small"><a href="diagnostics.html">Diagnostics</a> · connection checks and the workbook self-test</p>
+    <p class="small muted">TPAHA Books <span id="app-version"></span></p>
+  </div>
+</main>
+<script src="vendor/msal-browser.min.js"></script>
+<script type="module">
+  import { CONFIG } from './js/config.js';
+  import { initAuth } from './js/auth.js';
+  import { h } from './js/ui.js';
+  import './js/pwa.js';
+  document.getElementById('app-version').textContent = `v${CONFIG.appVersion}`;
+  const status = document.getElementById('account-status');
+  try {
+    const auth = await initAuth(CONFIG);
+    if (auth.mode === 'local') {
+      status.textContent = 'Test mode (sample data)';
+    } else if (auth.account) {
+      status.textContent = `Signed in as ${auth.account.name}`;
+      document.getElementById('signin-card').append(h('button', { type: 'button', className: 'btn', onClick: () => auth.signOut() }, 'Sign out'));
+    } else {
+      status.textContent = 'Not signed in';
+      document.getElementById('signin-card').append(h('div', { className: 'card' },
+        h('p', {}, 'Sign in with your TPAHA Microsoft account to open the shared data in OneDrive.'),
+        h('button', { type: 'button', className: 'btn btn-primary btn-lg', onClick: () => auth.signIn() }, 'Sign in with Microsoft')));
+    }
+  } catch (e) {
+    status.textContent = 'Sign-in unavailable';
+    console.error(e);
+  }
+</script>
+</body>
+</html>

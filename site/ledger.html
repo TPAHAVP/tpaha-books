@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en-CA">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#39584C">
+<title>Treasurer Ledger · TPAHA Books</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="icon" href="icons/icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+<header class="app-header">
+  <div><a href="index.html">TPAHA Books</a><h1>Treasurer Ledger <span id="year"></span></h1></div>
+  <div id="sync-status" aria-live="polite"><span id="workbook-name"></span></div>
+</header>
+<div id="mode-banner" class="banner" hidden></div>
+<div id="pilot-banner" class="banner pilot" hidden></div>
+<div id="halt-banner" class="banner halt" role="alert" hidden></div>
+<nav class="tabs" id="tabs" role="tablist">
+  <button type="button" role="tab" data-tab="entry">Entry</button>
+  <button type="button" role="tab" data-tab="months">Months</button>
+  <button type="button" role="tab" data-tab="annual">Annual</button>
+  <button type="button" role="tab" data-tab="settings">Settings</button>
+</nav>
+<main id="main">
+  <section id="tab-entry" role="tabpanel">
+    <div class="card">
+      <h2>Add a transaction</h2>
+      <form id="entry-form" novalidate autocomplete="off">
+        <div class="grid-form">
+          <label class="field">Transaction Date <input class="entry" type="date" name="date" required></label>
+          <label class="field">Transaction Type
+            <select class="entry" name="type" required>
+              <option value="">Choose a type</option>
+              <option value="Deposit">Deposit</option>
+              <option value="Withdrawal">Withdrawal</option>
+            </select></label>
+          <label class="field">Category <select class="entry" name="category" required><option value="">Choose a category</option></select></label>
+          <label class="field">Amount ($) <input class="entry" type="text" inputmode="decimal" name="amount" placeholder="0.00"></label>
+          <label class="field">Description <input class="entry" type="text" name="description" maxlength="200"></label>
+          <label class="field">Cheque # <input class="entry" type="text" inputmode="numeric" name="chequeNum"></label>
+          <label class="field">Notes <input class="entry" type="text" name="notes" maxlength="500"></label>
+        </div>
+        <div class="row" style="align-items:center">
+          <button type="submit" id="btn-submit" class="btn btn-primary btn-lg" disabled>Save to workbook</button>
+          <div id="save-actions" class="row"></div>
+        </div>
+        <div id="save-state" class="save-state" data-state="idle" aria-live="polite"></div>
+      </form>
+    </div>
+    <div class="card">
+      <h2>Transactions in the workbook <button type="button" id="btn-refresh" class="btn btn-sm">Refresh</button></h2>
+      <form id="search-form" novalidate class="row">
+        <label class="field">From <input type="date" name="from"></label>
+        <label class="field">To <input type="date" name="to"></label>
+        <label class="field">Search <input type="search" name="text" placeholder="description, cheque, amount"></label>
+      </form>
+      <p id="list-summary" class="small muted"></p>
+      <div class="table-wrap"><table id="txn-table"><thead></thead><tbody></tbody></table></div>
+    </div>
+  </section>
+
+  <section id="tab-months" role="tabpanel" hidden>
+    <div class="card">
+      <div id="month-chips" class="chips no-print"></div>
+      <p class="small"><span id="month-source" class="muted"></span> · <span id="month-check"></span></p>
+      <div id="month-view"></div>
+    </div>
+  </section>
+
+  <section id="tab-annual" role="tabpanel" hidden>
+    <div class="card">
+      <p class="small"><span class="muted">Workbook figures (Annual sheet)</span> · <span id="annual-check"></span></p>
+      <div id="annual-view"></div>
+    </div>
+  </section>
+
+  <section id="tab-settings" role="tabpanel" hidden>
+    <div class="card">
+      <h2>Prior-year balance</h2>
+      <p class="small muted">Stored in the workbook (ENTRY sheet). The January opening balance comes from it.</p>
+      <form id="settings-form" novalidate class="row" style="align-items:center">
+        <label class="field">Prior Year Balance ($) <input class="entry" type="text" inputmode="decimal" name="priorYearBalance"></label>
+        <button type="submit" id="btn-save-settings" class="btn btn-primary">Save to workbook</button>
+      </form>
+      <div id="settings-state" class="save-state" data-state="idle" aria-live="polite"></div>
+    </div>
+    <div class="card">
+      <h2>Workbook</h2>
+      <div id="workbook-info" class="small"></div>
+      <div class="row" style="margin-top:.5rem">
+        <button type="button" id="btn-change-workbook" class="btn btn-sm" hidden>Choose a different workbook</button>
+        <a class="btn btn-sm" href="diagnostics.html">Diagnostics</a>
+      </div>
+    </div>
+    <div class="card" id="account-card">
+      <h2>Account</h2>
+      <p id="account-info" class="muted"></p>
+      <button type="button" id="btn-signout" class="btn">Sign out</button>
+    </div>
+    <p class="small muted">TPAHA Books <span id="app-version"></span></p>
+  </section>
+</main>
+
+<dialog id="edit-dialog">
+  <form id="edit-form" novalidate autocomplete="off" method="dialog">
+    <h2 id="edit-title">Correct transaction</h2>
+    <div class="grid-form">
+      <label class="field">Transaction Date <input class="entry" type="date" name="date"></label>
+      <label class="field">Transaction Type <select class="entry" name="type"><option value="Deposit">Deposit</option><option value="Withdrawal">Withdrawal</option></select></label>
+      <label class="field">Category <select class="entry" name="category"></select></label>
+      <label class="field">Amount ($) <input class="entry" type="text" inputmode="decimal" name="amount"></label>
+      <label class="field">Description <input class="entry" type="text" name="description" maxlength="200"></label>
+      <label class="field">Cheque # <input class="entry" type="text" inputmode="numeric" name="chequeNum"></label>
+      <label class="field">Notes <input class="entry" type="text" name="notes" maxlength="500"></label>
+    </div>
+    <div id="edit-state" class="save-state" data-state="idle" aria-live="polite"></div>
+    <div id="edit-actions" class="row"></div>
+    <div class="row-end">
+      <button type="button" class="btn" id="btn-edit-cancel">Cancel</button>
+      <button type="submit" class="btn btn-primary" id="btn-edit-save">Save to workbook</button>
+    </div>
+  </form>
+</dialog>
+
+<script src="vendor/msal-browser.min.js"></script>
+<script type="module" src="js/pwa.js"></script>
+<script type="module" src="js/ledger/app.js"></script>
+</body>
+</html>

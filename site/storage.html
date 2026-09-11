@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="en-CA">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#39584C">
+<title>Winter Storage · TPAHA Books</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="icon" href="icons/icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+<header class="app-header">
+  <div><a href="index.html">TPAHA Books</a><h1>Winter Storage <span id="storage-year"></span></h1></div>
+  <div id="sync-status" aria-live="polite"></div>
+</header>
+<div id="mode-banner" class="banner" hidden></div>
+<nav class="tabs" id="tabs" role="tablist">
+  <button type="button" role="tab" data-tab="map">Map</button>
+  <button type="button" role="tab" data-tab="list">List</button>
+  <button type="button" role="tab" data-tab="reserve">Reserve</button>
+  <button type="button" role="tab" data-tab="print">Print</button>
+  <button type="button" role="tab" data-tab="settings">Settings</button>
+</nav>
+<main id="main">
+  <section id="tab-map" role="tabpanel">
+    <div class="card">
+      <div class="map-header"><span id="hdr-assigned"></span><span id="hdr-revenue"></span><span id="hdr-width" class="muted"></span></div>
+      <p class="small muted" style="margin:.5rem 0 0">Tap a space to enter or change customer details. Yellow fields are the entry fields.</p>
+    </div>
+    <div class="card">
+      <h2>Move / swap assignments</h2>
+      <div class="row">
+        <label class="field">Spot 1 <select id="swap-a" class="entry"></select></label>
+        <label class="field">Spot 2 <select id="swap-b" class="entry"></select></label>
+        <button type="button" id="btn-swap" class="btn btn-primary">Complete Storage Swap</button>
+      </div>
+      <div id="swap-status" class="status-line" aria-live="polite"></div>
+    </div>
+    <div id="map"></div>
+  </section>
+
+  <section id="tab-list" role="tabpanel" hidden>
+    <div class="card">
+      <h2>Storage list <button type="button" class="btn btn-sm no-print" id="btn-print-list">Print</button></h2>
+      <p class="small muted">This list updates from the map. Enter and change customer details on the map.</p>
+      <div class="table-wrap"><table id="storage-list"></table></div>
+    </div>
+  </section>
+
+  <section id="tab-reserve" role="tabpanel" hidden>
+    <div class="card">
+      <h2>Reserve list <button type="button" id="btn-add-reserve" class="btn btn-primary">Add Reserve Line</button></h2>
+      <p class="small muted">Enter reserve customers here. Changes save as you type. Remove Reserve Line removes one row.</p>
+      <div id="reserve-status" class="status-line" aria-live="polite"></div>
+      <div class="table-wrap cards"><table id="reserve-table"></table></div>
+    </div>
+  </section>
+
+  <section id="tab-print" role="tabpanel" hidden>
+    <div class="card no-print">
+      <h2>PRINT / DOWNLOAD PDF <button type="button" id="btn-print" class="btn btn-primary">Export Printable PDF</button></h2>
+      <p class="small muted">11 x 17 inches, portrait, one page. Current assignments with space for handwritten changes. On an iPhone choose Print, then pinch the preview open or pick Save to Files to keep a PDF.</p>
+    </div>
+    <div class="print-wrap"><div id="print-sheet"></div></div>
+  </section>
+
+  <section id="tab-settings" role="tabpanel" hidden>
+    <div class="card">
+      <h2>Storage settings</h2>
+      <form id="settings-form" novalidate>
+        <div class="grid-form">
+          <label class="field">Storage year <input class="entry" type="number" name="storageYear" min="1900" max="9999"></label>
+          <label class="field">Boat fee (CAD) <input class="entry" type="number" name="rateBoat" min="0" step="0.01"></label>
+          <label class="field">Pontoon / Camper fee (CAD) <input class="entry" type="number" name="ratePontoon" min="0" step="0.01"></label>
+        </div>
+        <h3>Arena settings (ft)</h3>
+        <div class="grid-form">
+          <label class="field">Arena length <input class="entry" type="number" name="length" min="0.1" step="0.1"></label>
+          <label class="field">Arena width <input class="entry" type="number" name="width" min="0.1" step="0.1"></label>
+          <label class="field">First-row block depth <input class="entry" type="number" name="firstRowBlockDepth" min="0.1" step="0.1"></label>
+          <label class="field">Gap between rows <input class="entry" type="number" name="gapBetweenRows" min="0" step="0.1"></label>
+          <label class="field">Main-column width <input class="entry" type="number" name="mainColumnWidth" min="0.1" step="0.1"></label>
+          <label class="field">Left side margin <input class="entry" type="number" name="leftMargin" min="0" step="0.1"></label>
+          <label class="field">Right side margin <input class="entry" type="number" name="rightMargin" min="0" step="0.1"></label>
+          <label class="field">Gap between columns <input class="entry" type="number" name="gapBetweenColumns" min="0" step="0.1"></label>
+        </div>
+        <h3>Sideways end spaces (ft)</h3>
+        <div class="grid-form">
+          <label class="field">END-1 length <input class="entry" type="number" name="end1Length" min="0.1" step="0.1"></label>
+          <label class="field">END-1 depth <input class="entry" type="number" name="end1Depth" min="0.1" step="0.1"></label>
+          <label class="field">END-2 length <input class="entry" type="number" name="end2Length" min="0.1" step="0.1"></label>
+          <label class="field">END-2 depth <input class="entry" type="number" name="end2Depth" min="0.1" step="0.1"></label>
+        </div>
+        <button type="submit" id="btn-save-settings" class="btn btn-primary">Save settings</button>
+      </form>
+    </div>
+    <div class="card">
+      <h2>Export</h2>
+      <div class="row"><button type="button" id="btn-export-xlsx" class="btn">Export Excel (Storage List + Reserve List)</button></div>
+    </div>
+    <div class="card">
+      <h2>Data file</h2>
+      <p class="small muted" id="data-location"></p>
+      <div class="row">
+        <button type="button" id="btn-export-json" class="btn">Download data file</button>
+        <button type="button" id="btn-import" class="btn">Import data file</button>
+        <input type="file" id="file-import" accept="application/json,.json" hidden>
+      </div>
+      <div id="share-url-settings" class="row" style="margin-top:.75rem" hidden></div>
+    </div>
+    <div class="card" id="account-card">
+      <h2>Account</h2>
+      <p id="account-info" class="muted"></p>
+      <button type="button" id="btn-signout" class="btn" hidden>Sign out</button>
+    </div>
+    <p class="small muted">TPAHA Books <span id="app-version"></span></p>
+  </section>
+</main>
+
+<dialog id="spot-dialog">
+  <form name="spot" id="spot-form" novalidate autocomplete="off" method="dialog">
+    <h2 id="spot-dialog-title"></h2>
+    <div class="grid-form">
+      <label class="field">Name <input class="entry" name="name" maxlength="120"></label>
+      <label class="field">Boat / camper / equipment <input class="entry" name="equipment" maxlength="120"></label>
+      <label class="field">Phone <input class="entry" name="phone" inputmode="tel" maxlength="60"></label>
+      <label class="field">Licence plate <input class="entry" name="plate" maxlength="30"></label>
+    </div>
+    <div class="grid-3">
+      <label class="field">Length (ft) <input class="entry" name="length" inputmode="decimal"></label>
+      <label class="field">Width (ft) <input class="entry" name="width" inputmode="decimal"></label>
+      <label class="field">Qty <input class="entry" name="qty" inputmode="numeric"></label>
+    </div>
+    <div class="grid-3">
+      <label class="field">First year <input class="entry" name="firstYear" inputmode="numeric"></label>
+      <label class="field">Years stored <output name="yearsStored"></output></label>
+      <label class="field">Type <select class="entry" name="type"><option value="">Choose rate</option><option>Boat</option><option>Pontoon / Camper</option></select></label>
+    </div>
+    <div class="grid-2">
+      <label class="field">Fee override (CAD) <input class="entry" name="feeOverride" inputmode="decimal" placeholder="blank = use rate"></label>
+      <label class="field">Total fee (CAD) <output name="totalFee"></output></label>
+    </div>
+    <label class="field">Notes / arrival <input class="entry" name="notes" maxlength="200"></label>
+    <p class="small muted">Length and width mean the complete stored footprint, including trailers and hitches. To empty a space, use Clear space.</p>
+    <div class="row-end">
+      <button type="button" class="btn btn-danger" id="btn-spot-clear">Clear space</button>
+      <button type="button" class="btn" id="btn-spot-cancel">Cancel</button>
+      <button type="submit" class="btn btn-primary" id="btn-spot-save">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<script src="vendor/msal-browser.min.js"></script>
+<script src="vendor/xlsx.full.min.js"></script>
+<script type="module" src="js/pwa.js"></script>
+<script type="module" src="js/storage/app.js"></script>
+</body>
+</html>
