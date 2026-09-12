@@ -580,20 +580,29 @@ const REPORT_INTERRUPTED = 'A change was interrupted before the monthly report r
 /**
  * Written BEFORE the first workbook change, not after it (review W2). If this page closes between the
  * transaction landing and the formatting finishing, the months are already recorded and the next visit offers
- * to finish them. Nothing is rendered here, so an ordinary save shows no banner on its way past. Returns the
- * months reserved, so a call that turns out to write nothing can release them again.
+ * to finish them. Nothing is rendered here, so an ordinary save shows no banner on its way past.
+ *
+ * Returns only the months this call ADDED, never months that were already outstanding (review W2b), so a call
+ * that turns out to write nothing can release its own reservation without erasing an older, still-unfinished
+ * reminder for the same month. Only verified completion clears that, through noteReportFormatting.
  */
 function reserveReportFormatting(months) {
   const wanted = [...new Set((months || []).filter(m => m >= 1 && m <= 12))];
   if (!wanted.length || !state.reportFmt) return [];
-  try { state.reportFmtRec = state.reportFmt.add(wanted, REPORT_INTERRUPTED, 'interrupted'); }
-  catch (e) {
+  try {
+    const { rec, added } = state.reportFmt.reserve(wanted, REPORT_INTERRUPTED, 'interrupted');
+    state.reportFmtRec = rec;
+    return added;
+  } catch (e) {
     if (e instanceof ReportFormattingStorageError && !state.reportFmtWarned) { state.reportFmtWarned = true; toast(e.message, 'error'); }
-    state.reportFmtRec = { months: wanted, message: REPORT_INTERRUPTED, blockedBy: 'interrupted' };   // this page still knows
+    state.reportFmtRec = e.fallback || { months: wanted, message: REPORT_INTERRUPTED, blockedBy: 'interrupted' };   // this page still knows
+    return e.added || wanted;
   }
-  return wanted;
 }
-/** Drops a reservation for an operation that provably wrote nothing. */
+/**
+ * Drops a reservation for an operation that provably wrote nothing. It is given only the months that operation
+ * added, so an older reminder for the same month survives (review W2b).
+ */
 function releaseReportFormatting(months) {
   if (!months || !months.length || !state.reportFmt) return;
   state.reportFmtRec = state.reportFmt.remove(months);

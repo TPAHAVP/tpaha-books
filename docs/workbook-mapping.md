@@ -334,6 +334,11 @@ The months affected are written into this browser **before the first workbook ch
 closed midway still knows what is outstanding; they are cleared only once the formatting is verified. If the
 browser refuses to keep that record, the member is told plainly rather than left believing it was kept.
 
+An operation that turns out to write nothing — a submit that was ignored as a duplicate, or one that stops at a
+conflict — takes back **only the months it added itself**. If September was already outstanding from an earlier
+change, a later September operation that never writes leaves that reminder exactly as it found it, wording and
+all. Nothing but verified formatting clears a month, because nothing else has fixed the rows.
+
 The transaction is already in the workbook and is never written again. The screen says **"Transaction saved.
 Excel report formatting still needs updating."** (for a delete, "Transaction deleted."), the months still to do
 are kept in this browser so a reload does not forget them, and a **Finish report formatting** button finishes

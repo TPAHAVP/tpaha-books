@@ -160,3 +160,68 @@ test('W2: an ordinary save shows no banner, and a save that cannot be remembered
   await expect(page.locator('#save-state')).toHaveAttribute('data-state', 'saved');   // the save still goes through
   expect(await rowsNamed(page, 'Storage refused')).toBe(1);
 });
+
+/** Leaves September outstanding: the save lands, its row-visibility pass does not. */
+const leaveSeptemberPending = async (page, description) => {
+  await blockVisibility(page, 'September');
+  await fillEntry(page, { description });
+  await page.click('#btn-submit');
+  await expect(page.locator('#save-state')).toHaveAttribute('data-state', 'saved');
+  await expect(page.locator('#report-banner')).toContainText('Transaction saved. Excel report formatting still needs updating.');
+  await expect(page.locator('#report-banner')).toContainText('September');
+};
+/** Makes row 14 look changed in Excel, so the next operation on it conflicts before writing anything. */
+const changedInExcel = page => page.evaluate(() => {
+  const t = window.__tpahaMock.table('LOG_Table');
+  t.setCell(t.rows.findIndex(r => r[0] === 14), 6, 'Edited in Excel');
+});
+
+test('W2b: a conflicting operation in a month that is already outstanding leaves the older reminder in place, through the conflict and a reload', async ({ page }) => {
+  await open(page);
+  await leaveSeptemberPending(page, 'September still unformatted');
+
+  // A second September operation reserves the same month, then conflicts before writing anything.
+  await changedInExcel(page);
+  await page.click('#txn-table tbody tr[data-id="14"] .btn-delete');
+  await page.click('dialog.confirm .btn-danger');
+  await expect(page.locator('dialog.conflict')).toBeVisible();
+  await expect(page.locator('#txn-table tbody tr[data-id="14"]')).toHaveCount(1);      // nothing was deleted
+
+  // The older unfinished work is still September's, and still says why.
+  await expect(page.locator('#report-banner')).toBeVisible();
+  await expect(page.locator('#report-banner')).toContainText('September');
+  await expect(page.locator('#report-banner')).toContainText('Transaction saved. Excel report formatting still needs updating.');
+
+  await page.click('dialog.conflict .btn-reload');
+  await expect(page.locator('#report-banner')).toContainText('September');
+  await page.reload();
+  await expect(page.locator('#txn-table tbody tr[data-id="14"]')).toHaveCount(1);
+  await expect(page.locator('#report-banner')).toBeVisible();                          // it survived the reload too
+  await expect(page.locator('#report-banner')).toContainText('September');
+  expect(await writesSinceLoad(page)).toBe(0);                                         // and still nothing runs on its own
+
+  // And it can still be finished: the rows are set, and no transaction is written.
+  await page.click('#report-banner .btn-finish-report');
+  await expect(page.locator('#report-banner')).toBeHidden();
+  expect(await visibleRows(page, 'September')).toEqual([4]);
+  expect(await page.evaluate(() => window.__tpahaMock.table('LOG_Table').rows.length)).toBe(14);
+});
+
+test('W2b: a conflicting correction across months releases only the month it brought in', async ({ page }) => {
+  await open(page);
+  await leaveSeptemberPending(page, 'September still unformatted');
+
+  // Correcting September to October reserves both, then conflicts before writing anything.
+  await changedInExcel(page);
+  await page.click('#txn-table tbody tr[data-id="14"] .btn-edit');
+  await page.fill('#edit-form [name=date]', '2026-10-02');
+  await page.click('#btn-edit-save');
+  await expect(page.locator('#edit-state')).toHaveAttribute('data-state', 'conflict');
+
+  await expect(page.locator('#report-banner')).toBeVisible();
+  await expect(page.locator('#report-banner')).toContainText('September');             // the older reminder is untouched
+  await expect(page.locator('#report-banner')).not.toContainText('October');           // and October, which it reserved and never wrote, is gone
+  await page.reload();
+  await expect(page.locator('#report-banner')).toContainText('September');
+  await expect(page.locator('#report-banner')).not.toContainText('October');
+});

@@ -47,6 +47,30 @@ export class ReportFormattingStore {
     }
     return rec;
   }
+  /**
+   * Reserves months before an operation writes anything, and returns `added`: only the months that were not
+   * already outstanding. Releasing an operation that wrote nothing must release only those, or it erases an
+   * older reminder that is still unfinished and whose rows are still wrong (review W2b).
+   *
+   * An existing record keeps its own message and reason. A reservation is made before anything is attempted,
+   * so it knows less than a completed operation did, and must not overwrite what that operation reported.
+   * Only verified completion clears months, through remove().
+   */
+  reserve(months, message, blockedBy) {
+    const current = this.read();
+    const before = new Set(current ? current.months : []);
+    const wanted = clean(months);
+    const added = wanted.filter(m => !before.has(m));
+    const msg = (current && current.message) || message;
+    const why = (current && current.blockedBy) || blockedBy;
+    try {
+      return { rec: this.add(wanted, msg, why), added };
+    } catch (e) {
+      e.added = added;                                                    // so the caller can still release its own
+      e.fallback = { months: [...new Set([...before, ...wanted])], message: msg, blockedBy: why };
+      throw e;
+    }
+  }
   /** Drops months that have since been formatted. Returns what is left, or null. */
   remove(months) {
     const current = this.read();

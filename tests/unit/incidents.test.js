@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { incidentKey, IncidentStore } from '../../site/js/save/incidents.js';
 import { createTabGuard } from '../../site/js/save/tab-guard.js';
+import { reportFormattingKey, ReportFormattingStore, ReportFormattingStorageError } from '../../site/js/save/report-formatting.js';
 
 class MemStorage {
   constructor() { this.m = new Map(); this.failWrites = false; }
@@ -67,4 +68,64 @@ test('two tabs starting at the same moment: exactly one becomes primary (lower i
   const [ra, rb] = await Promise.all([a.start(), b.start()]);
   assert.equal(ra.primary, true);
   assert.equal(rb.primary, false);
+});
+
+// ---- unfinished monthly report formatting ----------------------------------------------------
+const fmtStore = () => new ReportFormattingStore(new MemStorage(), reportFormattingKey({ tenantId: 't', homeAccountId: 'u', workbookId: 'w' }));
+
+test('W2b: reserving a month that is already outstanding adds nothing to release, so a conflict cannot erase the older reminder', () => {
+  const s = fmtStore();
+  s.add([9], 'Transaction saved. Excel report formatting still needs updating.', 'formatting');
+  const { rec, added } = s.reserve([9], 'A change was interrupted…', 'interrupted');
+  assert.deepEqual(added, [], 'September was already outstanding: this operation added nothing');
+  assert.deepEqual(rec.months, [9]);
+  assert.equal(rec.message, 'Transaction saved. Excel report formatting still needs updating.', 'the older, more precise reason is kept');
+  assert.equal(rec.blockedBy, 'formatting');
+  s.remove(added);                                      // the operation conflicted and released what it added
+  assert.deepEqual(s.read().months, [9], 'the older reminder survives');
+  assert.equal(s.read().message, 'Transaction saved. Excel report formatting still needs updating.');
+});
+
+test('W2b: a reservation releases only the months it introduced', () => {
+  const s = fmtStore();
+  s.add([9], 'older', 'formatting');
+  const { added } = s.reserve([9, 10], 'newer', 'interrupted');
+  assert.deepEqual(added, [10]);
+  assert.deepEqual(s.read().months, [9, 10]);
+  s.remove(added);
+  assert.deepEqual(s.read().months, [9], 'only the month this operation brought in is dropped');
+  assert.equal(s.read().message, 'older');
+});
+
+test('W2b: with nothing outstanding, a reservation owns what it reserves and uses its own wording', () => {
+  const s = fmtStore();
+  const { rec, added } = s.reserve([3], 'interrupted wording', 'interrupted');
+  assert.deepEqual(added, [3]);
+  assert.equal(rec.message, 'interrupted wording');
+  assert.equal(rec.blockedBy, 'interrupted');
+  s.remove(added);
+  assert.equal(s.read(), null, 'nothing left');
+});
+
+test('W2b: only verified completion clears an outstanding month', () => {
+  const s = fmtStore();
+  s.add([9], 'pending', 'formatting');
+  s.reserve([9], 'x', 'interrupted');
+  assert.deepEqual(s.read().months, [9]);
+  assert.equal(s.remove([9]), null, 'a completed, verified format clears it');
+  assert.equal(s.read(), null);
+});
+
+test('a storage refusal is reported, and still tells the caller what it would have added', () => {
+  const mem = new MemStorage();
+  const s = new ReportFormattingStore(mem, reportFormattingKey({ tenantId: 't', homeAccountId: 'u', workbookId: 'w' }));
+  s.add([9], 'pending', 'formatting');
+  mem.failWrites = true;
+  try { s.reserve([9, 11], 'x', 'interrupted'); assert.fail('should have thrown'); }
+  catch (e) {
+    assert.ok(e instanceof ReportFormattingStorageError);
+    assert.deepEqual(e.added, [11]);
+    assert.deepEqual(e.fallback.months, [9, 11]);
+    assert.equal(e.fallback.message, 'pending', 'the existing reason is still the one to show');
+  }
 });

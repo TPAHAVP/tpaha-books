@@ -9,6 +9,50 @@ or in the repository; nothing has connected to Microsoft 365; no production work
 
 ---
 
+## 2026-09-12 (third) — Review fix W2b: a conflicting operation no longer erases older unfinished work. **For review; not published, no live write**
+
+Codex reviewed `d5a0faa`, accepted W1, and found that W2 was still wrong in one case. Reproduced exactly as
+reported: existing `[9]`, reserve `[9]`, release `[9]` → `null`.
+
+**What went wrong.** `reserveReportFormatting` returned every month it was asked for, not only the months it
+actually added. September could already be outstanding from an earlier change whose rows were never fixed; a new
+September correction or delete reserved September again, hit a conflict before writing anything, and released
+September — deleting a reminder that was still true. The rows stayed wrong and nothing said so any more.
+
+**The fix.** A reservation now knows which pending work is its own. `ReportFormattingStore.reserve()` reads what
+is already outstanding, merges the wanted months, and returns `added`: only those that were not outstanding
+before. A release is given `added`, so it can only ever take back work that same operation created. An existing
+record also keeps its own message and reason — a reservation is made before anything is attempted, so it knows
+less than the completed operation that wrote the record did, and must not overwrite it. Clearing a month is
+still only ever done by `remove()` after verified completion.
+
+| Case | Before | After |
+|---|---|---|
+| September outstanding, September operation conflicts | reminder deleted, rows still wrong | reminder kept, wording kept |
+| September outstanding, correction to October conflicts | both deleted | September kept; October, which that operation added and never wrote, released |
+| Nothing outstanding, operation conflicts | released | released (unchanged) |
+| Formatting verified complete | cleared | cleared (unchanged) |
+
+### Regression evidence
+- **Browser (the one asked for):** an existing pending September, then a conflicting delete in September. The
+  conflict dialog appears, no transaction is deleted, the banner still names September with its original
+  wording, and it is still there after a reload with **zero writes at startup**; pressing Finish report
+  formatting then completes it with the transaction table untouched. A second test covers the cross-month
+  correction. Both **fail against the previous code** — verified by restoring the old return value and
+  re-running: 2 failed, then 2 passed with the fix in place.
+- **Unit:** five tests on the store, including the reported sequence (`add([9])`, `reserve([9])` → `added: []`,
+  `remove([])` → September survives), the cross-month case, the no-prior-work case, verified completion still
+  clearing, and a storage refusal still reporting what it would have added.
+
+### Tests (2026-09-12, this folder)
+- `npm test`: **146 passed, 0 failed** (was 141).
+- `npx playwright test`: **189 passed, 0 failed** (was 183) = 63 per project × 3.
+- `npm run verify:config`: 21 passed.
+
+Still not published, and no live write has been run.
+
+---
+
 ## 2026-09-12 (later) — Review fixes W1 and W2 on the report-row work. **For review; not published, no live write**
 
 Codex reviewed `9e464cd` and found two defects. Both are fixed, with regression tests that fail against the
@@ -17,7 +61,7 @@ previous code.
 | # | Finding | Fix | Regression evidence |
 |---|---|---|---|
 | W1 | Formatting ran even when the sorted helper table came back unverified, so rows could be set from stale report figures and then reported as complete (`reportFormatting: null`, `formattedMonths: [9]`) | `_finishReportRows(months, sortedConsistent)` now gates every write path. When the helper table is not verified, **no visibility request is sent**, the months are recorded as unfinished with `blockedBy: 'sorted-table'`, and `formattedMonths` is empty. The retry `finishReportRows()` rebuilds the helper table first and only then formats, and the banner says which of the two it is doing | Unit: an add, a delete and a correction under a helper table that cannot be written all leave the report rows untouched and name the reason; the retry repairs then formats and is idempotent; a month sheet re-protected against row formatting is reported with the setting named |
-| W2 | The months were recorded only after the operation returned, so closing or reloading between the transaction landing and the formatting returning lost the unfinished work, worst of all after a delete | The months are written **before the first workbook change** and cleared **only after verified completion**. A call that provably writes nothing (ignored submit, conflict) releases its reservation. A storage refusal is now surfaced to the member instead of swallowed, and the page keeps the record in memory for the rest of the visit | Browser: holding the visibility request open, reloading mid-operation, and finding the work still offered afterwards with zero writes at startup; plus an ordinary save showing no banner, and a stubbed storage failure producing a visible message while the save still succeeds |
+| W2 | The months were recorded only after the operation returned, so closing or reloading between the transaction landing and the formatting returning lost the unfinished work, worst of all after a delete | The months are written **before the first workbook change** and cleared **only after verified completion**. A call that provably writes nothing (ignored submit, conflict) releases its reservation — and, after the W2b fix below, only the part of it that call added. A storage refusal is now surfaced to the member instead of swallowed, and the page keeps the record in memory for the rest of the visit | Browser: holding the visibility request open, reloading mid-operation, and finding the work still offered afterwards with zero writes at startup; plus an ordinary save showing no banner, and a stubbed storage failure producing a visible message while the save still succeeds |
 
 Also in this pass, at the reviewer's direction:
 - **Removed the advice to press a workbook button for recovery.** Run SubmitEntry and Run DeleteTransaction
