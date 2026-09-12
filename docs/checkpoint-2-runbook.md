@@ -47,15 +47,44 @@ anyone, so read the log rather than pushing again.
 
 **0.5 — Verify what is being served, not what was pushed.**
 
+`js/config.js` is **not changed by this deployment**, so hashing it proves only that some deployment happened
+once. The check has to use a file this release actually changes. Two do the job, and both are worth running:
+
+| File | Before this deployment | After |
+|---|---|---|
+| `js/save/report-formatting.js` | **404** — the file does not exist on the live site | 200, SHA-256 `49C85F6F0699EB1B2B60CBE8BEBEEE785BE008DA25AE38FE23C2E80AF8402CF0` |
+| `js/workbook/ledger-workbook.js` | 200, SHA-256 `20CD704CB1F59E1CFDFE31930A05EE9A1709AA3E46189F483BC8FF344F4EB7EA` | 200, SHA-256 `2CDDFCA75FDF5C804C6924B6DE5644E2DFF73A00FFE4A8067C4E6A771B69261A` |
+
+The first is a new file, so its mere presence proves the new code is live. The second must **change**, which
+proves the old build was replaced rather than a stale copy being served from cache. Both before-values were
+measured against the live site on 2026-09-12.
+
+If more commits land before this is run, re-derive the after-values rather than trusting the table — they are
+the hashes of the files being deployed, not of the release name:
+`git show HEAD:site/js/save/report-formatting.js | sha256sum` and the same for `ledger-workbook.js`.
+
 1. Hard-refresh `https://tpahavp.github.io/tpaha-books/` (Ctrl+F5). The ledger page loads and there is **no**
    "Test mode" banner — on a published address the site is in connected mode.
-2. Check the deployed configuration file is byte-for-byte the reviewed one. In PowerShell:
+2. In PowerShell, hash what the server actually returns:
    ```
-   Invoke-WebRequest https://tpahavp.github.io/tpaha-books/js/config.js -OutFile $env:TEMP\deployed-config.js
-   Get-FileHash $env:TEMP\deployed-config.js -Algorithm SHA256
+   $site = 'https://tpahavp.github.io/tpaha-books'
+   foreach ($f in 'js/save/report-formatting.js', 'js/workbook/ledger-workbook.js', 'js/config.js') {
+     $tmp = Join-Path $env:TEMP ('dep-' + ($f -replace '/','-'))
+     Invoke-WebRequest ("$site/$f" + "?nocache=" + (Get-Random)) -OutFile $tmp
+     '{0}  {1}' -f (Get-FileHash $tmp -Algorithm SHA256).Hash, $f
+     Remove-Item $tmp
+   }
    ```
-   Expect `BC25AC6C2BE1D4983C4844B5BC61C714CE9354C82C50C11281A9060CB499CE48`. Stop if it differs.
-3. Delete the download: `Remove-Item $env:TEMP\deployed-config.js`
+   The `?nocache=` is there so a cached copy cannot answer for the server.
+3. Compare with the table above, and with `BC25AC6C2BE1D4983C4844B5BC61C714CE9354C82C50C11281A9060CB499CE48`
+   for `js/config.js` — which must be **unchanged**, since the ids were not touched.
+
+Stop if `report-formatting.js` still returns 404, if `ledger-workbook.js` still hashes to the old value, or if
+`config.js` has moved. Any of those means the deployment did not take, and signing in would test the old code.
+
+If a hash is wrong only on your machine, try another browser or device before concluding: a service worker or a
+corporate proxy can serve a stale copy to one client. The `curl` equivalent, if you prefer it:
+`curl -s "$site/js/save/report-formatting.js" | sha256sum`
 
 **0.6 — Leave it signed out.** Do not sign in yet. Publishing is finished; the workbook test is a separate
 authorisation.
@@ -73,10 +102,11 @@ All five must be true before the write test is started. Any one missing means st
 ### A. Checkpoint 1 approved
 Done, 2026-09-08 (`IMPLEMENTATION_STATUS.md`).
 
-### B. The three Office Scripts — **read on 2026-09-10**
+### B. The workbook's four Office Scripts — **read on 2026-09-10 and 2026-09-12**
 
-Their source was supplied and checked. Result: **none of the three reads, parses or compares the Timestamp
-column**, so the app's nine-digit operation ids do not affect them. One real incompatibility was found and
+Their source was supplied and checked: SubmitEntry, DeleteTransaction and FindTransactions on 2026-09-10, and
+`RefreshReports` on 2026-09-12. Result: **none of the four reads, parses or compares the Timestamp column**,
+so the app's nine-digit operation ids do not affect them. One real incompatibility was found and
 fixed the same day (the app was sorting the helper table by table position where the scripts require date then
 transaction number, which would have made the buttons refuse to run after certain corrections). Full record in
 `docs/workbook-mapping.md` §7.
@@ -105,14 +135,14 @@ Both items from that review are now closed:
 
 Nothing needs changing for either decision; both describe the behaviour already built and reviewed.
 
-### C2. Hidden month rows — **still to decide** (see prerequisite B)
-Not a blocker for the setup work, but settle it before the pilot runs.
-
 ### D. Hosting and Microsoft setup finished
 **Done and published, 2026-09-11.** The site is live at `https://tpahavp.github.io/tpaha-books/` from
 `https://github.com/TPAHAVP/tpaha-books`, the Entra app registration is complete, and `site/js/config.js`
 carries its ids (verified by `npm run verify:config`, 21 checks). The deployed `js/config.js` was checked
 byte-for-byte against the committed file. The live site now offers Microsoft sign-in.
+
+**That check does not cover the release in Part 0.** `js/config.js` is unchanged by it, so it will still match
+whether or not the new code deployed. Part 0.5 verifies the files that did change.
 
 **Steps 1 to 3 of Part 2 were completed on 2026-09-11 and passed**: an assigned account signed in, the picker
 listed the intended `.xlsx`, it was confirmed, and all six read-only checks passed with every content request

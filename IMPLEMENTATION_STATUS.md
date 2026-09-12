@@ -9,6 +9,38 @@ or in the repository; nothing has connected to Microsoft 365; no production work
 
 ---
 
+## 2026-09-12 (seventh) — Deployment verification now uses a file this release actually changes. **Nothing published; no live write**
+
+Three corrections to the walkthrough, at Cody's direction.
+
+**1. The deployment check was verifying the wrong file.** Part 0.5 hashed the deployed `js/config.js` against
+the committed one. That file is **not changed by this release**, so it matches whether or not the new code
+deployed — the check would have passed over a deployment that never happened, and the write test would then
+have run against the old code. Prerequisite D, which records the same check from 2026-09-11, now says so too.
+
+Part 0.5 now uses files this release does change, with the before-values measured against the live site today:
+
+| File | Before | After |
+|---|---|---|
+| `js/save/report-formatting.js` | **404**, the file does not exist on the live site | 200, `49C85F6F…02CF0` |
+| `js/workbook/ledger-workbook.js` | 200, `20CD704C…B7EA` | 200, `2CDDFCA7…261A` |
+
+The new file's presence proves the new code is live; the changed file's hash proves the old build was replaced
+rather than a cached copy served. `js/config.js` is still checked, but as a thing that must **not** move. The
+requests carry a `?nocache=` value so a cache cannot answer for the server, and the walkthrough says to
+re-derive the hashes with `git show HEAD:…` if further commits land before it is run.
+
+**2. Prerequisite B said "the three Office Scripts".** There are four; `RefreshReports` was read on 2026-09-12.
+Corrected, with both dates.
+
+**3. The "Hidden month rows — still to decide" note is gone.** It was settled and built, and prerequisite B
+already said so two paragraphs above — the walkthrough contradicted itself. Removing it also restores the
+count: Part 1 says five prerequisites and now lists five, A to E, where it had six.
+
+No code changed; tests unchanged from `7740e6c`: 152 unit, 189 browser, 21 config.
+
+---
+
 ## 2026-09-12 (sixth) — The deployment and test-copy walkthrough is written. **Nothing published; no live write**
 
 Codex approved `7740e6c`. `docs/checkpoint-2-runbook.md` is now the whole procedure, one step at a time, and
