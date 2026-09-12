@@ -51,12 +51,14 @@ Nothing needs changing for either decision; both describe the behaviour already 
 Not a blocker for the setup work, but settle it before the pilot runs.
 
 ### D. Hosting and Microsoft setup finished
-**Done on 2026-09-11, but not yet published.** The site is hosted at `https://tpahavp.github.io/tpaha-books/`
-from `https://github.com/TPAHAVP/tpaha-books`, the Entra app registration is complete, and `site/js/config.js`
-now carries its ids (verified by `npm run verify:config`, 17 checks). The commit has not been pushed, so the
-live page is still the test-mode one. **Publishing that commit is what turns the live site into a real sign-in
-page that can reach the workbook**; do it deliberately, and confirm afterwards that an assigned account can
-sign in and an unassigned one is refused.
+**Done and published, 2026-09-11.** The site is live at `https://tpahavp.github.io/tpaha-books/` from
+`https://github.com/TPAHAVP/tpaha-books`, the Entra app registration is complete, and `site/js/config.js`
+carries its ids (verified by `npm run verify:config`, 21 checks). The deployed `js/config.js` was checked
+byte-for-byte against the committed file. The live site now offers Microsoft sign-in.
+
+Still to confirm by hand, all read-only: an assigned account completes the redirect and returns to the site; an
+unassigned account is refused by Microsoft (AADSTS50105); the workbook picker lists the intended file; the six
+read-only checks pass. Signing in, choosing a workbook and running those checks issue GET requests only.
 
 `docs/setup-guide.md` parts A to D: the site published over HTTPS, the Entra app registration (single tenant,
 SPA redirect URI = the site address, `Files.ReadWrite` + `User.Read`, admin consent, **no client secret**),

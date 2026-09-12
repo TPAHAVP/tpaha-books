@@ -9,6 +9,48 @@ or in the repository; nothing has connected to Microsoft 365; no production work
 
 ---
 
+## 2026-09-11 (published) — The configured site is live; sign-in testing is next
+
+Pushed `b18dd2e..7625121` on Cody's instruction: `db30a38` (the registration configuration) and `7625121`
+(a correction to how the test-mode host rule is described). GitHub Pages redeployed from the new tip.
+
+### Deployment verified, all of it read-only
+| Check | Result |
+|---|---|
+| `/`, `/ledger.html`, `/diagnostics.html`, `/storage.html` | HTTP 200 |
+| Live `js/config.js` against the committed file at `7625121` | byte-identical |
+| `appVersion` served | `2026.09.11`, so phones fetch the new files |
+| Corrected host-rule wording present in the deployed file | yes |
+| Configuration checks (`npm run verify:config`) | 21 passed, 0 failed |
+| `npm test` / `npx playwright test` before publishing | 131 and 162 passed, 0 failed |
+
+Nothing here contacted Microsoft 365, no workbook was opened, and the Diagnostics write test was not run.
+
+### What publishing changed
+The live site is no longer a test-mode page. It now offers Microsoft sign-in to the five assigned accounts and,
+once a member identifies and confirms a workbook, can read and write it. Reading and writing are separate
+things and only the latter needs care: signing in, picking a workbook, browsing the ledger and running the six
+read-only Diagnostics checks issue GET requests only. A write happens when someone presses Save, Correct,
+Delete or the Diagnostics connection test.
+
+### The wording correction
+The host rule is a denylist of local hostnames, not an allowlist of the published one: `localhost`,
+`127.0.0.1`, `::1` and `file://` pages get blank ids, and **every other hostname gets them**, including a LAN
+address or a fork published elsewhere. That is deliberate; the client id is an identifier, not a credential.
+What confines a real sign-in to this site is the single SPA redirect URI in the registration, which Microsoft
+checks before issuing a token, together with assignment being required. `tools/verify-config.mjs` now asserts
+that shape with eight hostname cases rather than only describing it.
+
+### Next, and the limits on it
+Sign-in testing, which Codex is walking Cody through. Worth confirming: an assigned account completes the
+Microsoft redirect and returns to the site; an unassigned account is refused by Microsoft (AADSTS50105, "not
+assigned to a role for the application"); the workbook picker lists the intended file and the six read-only
+checks pass against it. **The Diagnostics connection test stays untouched** until `RefreshReports` has been
+supplied and reviewed, the hidden-month-row decision is made, and Cody authorises the run. The separate
+script-identity check in the runbook is likewise unauthorised.
+
+---
+
 ## 2026-09-11 (later) — Entra app registration complete; site configured, not yet published
 
 Cody completed the app registration and supplied its identifiers. `site/js/config.js` now carries them. No
