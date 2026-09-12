@@ -29,6 +29,8 @@ export class MockWorkbook {
     this.log = [];
     this.beforeRespond = null;
     this.hidden = new Map();     // sheet name -> Set of hidden row numbers
+    // As read from the real workbook on 2026-09-12: the month sheets are protected with row formatting allowed.
+    this.protection = new Map(MONTH_NAMES.map(n => [n, { protected: true, options: { allowFormatRows: true, allowFormatCells: false, allowFormatColumns: false } }]));
     this.onChange = null;        // called after every mutation (test-mode persistence)
     this.lastModified = '2026-09-06T01:23:54Z';
     this.eTag = 1;
@@ -77,6 +79,11 @@ export class MockWorkbook {
   }
   setCell(sheetName, address, value) { const a = parseAddress(address); this._set(this._sheet(sheetName), a.r1, a.c1, value); this._touch(); }
   /** Hidden row numbers on a sheet, ascending. */
+  /** Test hook: model a month sheet re-protected with row formatting disallowed. */
+  setAllowFormatRows(sheetName, allowed) {
+    const p = this.protection.get(sheetName) || { protected: true, options: {} };
+    this.protection.set(sheetName, { ...p, options: { ...p.options, allowFormatRows: allowed } });
+  }
   hiddenRows(sheetName) { return [...(this.hidden.get(sheetName) || new Set())].sort((a, b) => a - b); }
   setHiddenRows(sheetName, rows) { this.hidden.set(sheetName, new Set(rows)); this._touch(); }
   getCell(sheetName, address) { const a = parseAddress(address); return this._get(this._sheet(sheetName), a.r1, a.c1).v; }
@@ -251,6 +258,10 @@ export class MockWorkbook {
     // real workbook), so it is permitted here even on the protected, formula-driven sheets. Content is not.
     if (body.rowHidden !== undefined) {
       if (typeof body.rowHidden !== 'boolean') return graphError(400, 'BadRequest', 'invalidArgument', 'rowHidden must be a boolean');
+      const prot = this.protection.get(sheetName);
+      if (prot && prot.protected && prot.options && prot.options.allowFormatRows === false) {
+        return graphError(403, 'AccessDenied', 'accessDenied', 'The worksheet is protected and does not allow formatting rows.');
+      }
       const set = this.hidden.get(sheetName) || new Set();
       for (let r = a.r1; r <= a.r2; r++) { if (body.rowHidden) set.add(r); else set.delete(r); }
       this.hidden.set(sheetName, set);
@@ -353,6 +364,14 @@ export class MockWorkbook {
     if (rel === '/workbook/closeSession') { if (sessionId) this.sessions.delete(sessionId); return ok(null); }
     if (sessionId && !this.sessions.has(sessionId)) return graphError(404, 'ItemNotFound', 'invalidSessionReCreatable', 'The workbook session does not exist or has expired.');
     if (rel === '/workbook/application/calculate') return respond(ok(null));
+
+    const prot = /^\/workbook\/worksheets\/([^/]+)\/protection$/.exec(rel.split('?')[0]);
+    if (prot && method === 'GET') {
+      const name = prot[1];
+      if (!this.sheets.has(name)) return graphError(404, 'ItemNotFound', 'itemNotFound', `Worksheet ${name} not found`);
+      const p = this.protection.get(name) || { protected: false, options: {} };
+      return respond(ok({ protected: p.protected, options: p.options }));
+    }
 
     // tables
     let m = /^\/workbook\/tables\/([^/]+)(?:\/(.*))?$/.exec(rel.split('?')[0]);

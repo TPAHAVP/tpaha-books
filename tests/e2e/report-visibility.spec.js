@@ -97,7 +97,7 @@ test('when the formatting fails: the transaction is saved, the message says so, 
   expect(await page.evaluate(() => window.__tpahaMock.table('LOG_Table').rows.length)).toBe(14);
 });
 
-test('the retry only formats: it issues no request to the transaction tables', async ({ page }) => {
+test('the retry never writes the transaction table, whatever else it has to repair', async ({ page }) => {
   await open(page);
   await blockVisibility(page, 'September');
   await fillEntry(page, { description: 'Formatting only' });
@@ -107,8 +107,56 @@ test('the retry only formats: it issues no request to the transaction tables', a
   await page.click('#report-banner .btn-finish-report');
   await expect(page.locator('#report-banner')).toBeHidden();
   const touched = await page.evaluate(() => window.__tpahaMock.log.slice(window.__mark).map(e => `${e.method} ${e.url}`));
-  expect(touched.filter(u => /LOG_Table|LOG_Sorted_Table/.test(u))).toEqual([]);
+  // It may read the transaction table and repair the sorted helper table, but it must never WRITE a transaction.
+  expect(touched.filter(u => !u.startsWith('GET ') && /LOG_Table/.test(u))).toEqual([]);
   expect(touched.filter(u => /protection/.test(u))).toEqual([]);        // protection is never touched
   expect(touched.filter(u => /ENTRY/.test(u))).toEqual([]);             // nor the cell holding the password
   expect(touched.some(u => u.startsWith('PATCH') && /September/.test(u))).toBe(true);
+});
+
+/** Holds the first row-visibility PATCH open so the page can be reloaded mid-operation. */
+const holdVisibility = (page, month) => page.evaluate(m => {
+  window.__held = false;
+  window.__tpahaMock.beforeRespond = async e => {
+    if (!window.__held && e.method === 'PATCH' && e.url.includes(`worksheets/${m}/range`)) { window.__held = true; await new Promise(() => {}); }
+  };
+}, month);
+
+test('W2: reloading after the transaction lands but before the formatting returns still offers to finish it', async ({ page }) => {
+  await open(page);
+  await holdVisibility(page, 'September');
+  await fillEntry(page, { description: 'Interrupted before formatting' });
+  await page.click('#btn-submit');
+  await expect.poll(() => page.evaluate(() => window.__held === true)).toBe(true);
+  await expect.poll(() => rowsNamed(page, 'Interrupted before formatting')).toBe(1);   // the transaction has landed
+
+  await page.reload();                                                  // the operation never returned
+  await expect(page.locator('#txn-table tbody tr[data-id="14"]')).toHaveCount(1);
+  await expect(page.locator('#report-banner')).toBeVisible();
+  await expect(page.locator('#report-banner')).toContainText('interrupted');
+  await expect(page.locator('#report-banner')).toContainText('September');
+  expect(await writesSinceLoad(page)).toBe(0);                          // opening the page runs nothing
+
+  await page.click('#report-banner .btn-finish-report');
+  await expect(page.locator('#report-banner')).toBeHidden();
+  expect(await visibleRows(page, 'September')).toEqual([4]);
+  expect(await rowsNamed(page, 'Interrupted before formatting')).toBe(1);
+});
+
+test('W2: an ordinary save shows no banner, and a save that cannot be remembered says so', async ({ page }) => {
+  await open(page);
+  await fillEntry(page, { description: 'Plain save' });
+  await page.click('#btn-submit');
+  await expect(page.locator('#save-state')).toHaveAttribute('data-state', 'saved');
+  await expect(page.locator('#report-banner')).toBeHidden();            // the reservation is cleared on completion
+
+  await page.evaluate(() => {
+    const real = Storage.prototype.setItem;
+    Storage.prototype.setItem = function (k, v) { if (String(k).startsWith('tpaha:reportfmt:')) throw new DOMException('quota', 'QuotaExceededError'); return real.call(this, k, v); };
+  });
+  await fillEntry(page, { description: 'Storage refused' });
+  await page.click('#btn-submit');
+  await expect(page.locator('.toast-error').last()).toContainText('could not remember');
+  await expect(page.locator('#save-state')).toHaveAttribute('data-state', 'saved');   // the save still goes through
+  expect(await rowsNamed(page, 'Storage refused')).toBe(1);
 });

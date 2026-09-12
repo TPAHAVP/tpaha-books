@@ -103,10 +103,15 @@ New in 2026-09-12 and not yet run against the real workbook. Do this only with t
 it saves and deletes a real transaction on the test copy. The connection test in step 4 already exercises the
 same write on December, so if that passed, this is the confirmation in Excel.
 
+0. **This is also the check that the online copy's protection allows row formatting.** The local copy allows it;
+   that proves nothing about the pilot workbook. If the online sheets disallow it, step 3 will show the green
+   band with a message naming the sheet and the setting, and that is the answer.
 1. Open `TPAHA_2026 (1).xlsx` in Excel and go to a month sheet with few transactions, for example September.
    Note which of rows 4 to 33 are hidden. Close the workbook so the website is the only writer.
 2. On the website, add one clearly labelled transaction dated in that month. Wait for **Saved to workbook**.
-3. Confirm no green band appears. If it does, press **Finish report formatting** and note what it says.
+3. Confirm no green band appears. If it does, note its wording, press **Finish report formatting**, and note
+   what happens. A message naming "Format rows" means the online copy's protection disallows it; send that
+   wording rather than changing any protection setting yourself.
 4. Open the workbook in Excel again, go to that month sheet, and confirm the new transaction's row is **visible**
    and the blank rows below it are hidden. Use File, Print, Preview and confirm the row appears there too.
 5. Back on the website, delete that transaction. Confirm the website removes it.

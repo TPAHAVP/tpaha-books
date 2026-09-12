@@ -5,7 +5,7 @@ import { ExcelClient, ExcelApiError } from '../../site/js/workbook/excel-client.
 import {
   LedgerWorkbook, ConflictError, VerificationError, UnresolvedOperationError, MarkerCollisionError,
   rowFingerprint, rowToTxn, makeMarker, identityOf, expectedSortedRows, sortedTableMatches,
-  visibilityRuns, monthOfIso, REPORT_FORMATTING_SAVED,
+  visibilityRuns, monthOfIso, REPORT_FORMATTING_SAVED, REPORT_FORMATTING_DELETED,
 } from '../../site/js/workbook/ledger-workbook.js';
 import { SAMPLE_WORKBOOK as fixture } from '../../site/js/workbook/sample-workbook.js';
 import { SaveController } from '../../site/js/save/save-controller.js';
@@ -912,4 +912,73 @@ test('§8: syncMonthVisibility is idempotent, reads only the month it is given, 
   assert.deepEqual(touched.filter(e => /ENTRY/.test(e.url)), [], 'the password cell is never read');
   assert.deepEqual(touched.filter(e => MONTHS_RE.test(e.url) && !/September/.test(e.url)), [], 'only the month it was given');
   assert.deepEqual(await wb.syncMonthVisibility([]), { ok: true, months: [], runs: 0 });
+});
+
+// --------------------------------------------------------------- W1: never format from an unverified helper table
+/** Makes every write to LOG_Sorted fail, so the rebuild can never confirm itself. */
+const breakSortedTable = mock => { mock.beforeRespond = async e => { if (e.method !== 'GET' && /LOG_Sorted/.test(e.url)) throw new TypeError('Failed to fetch'); }; };
+
+test('W1: an add whose helper table could not be verified leaves the report rows alone and says why', async () => {
+  const { mock, wb } = setup();
+  await wb.load();
+  breakSortedTable(mock);
+  const res = await wb.addTransaction(entry({ date: '2026-09-06', description: 'Helper table broken' }), { marker: makeMarker() });
+  assert.equal(res.txn.id, 14, 'the transaction is still saved');
+  assert.deepEqual(visibilityWrites(mock), [], 'no report row was touched');
+  assert.deepEqual(mock.hiddenRows('September'), [], 'September is exactly as it was');
+  assert.ok(res.reportFormatting && res.reportFormatting.pending);
+  assert.equal(res.reportFormatting.blockedBy, 'sorted-table', 'and the reason is named');
+  assert.deepEqual(res.reportFormatting.months, [9]);
+  assert.deepEqual(res.formattedMonths, [], 'nothing is reported as formatted');
+  assert.ok(res.warnings.some(w => /sorted helper table/i.test(w)));
+});
+
+test('W1: the same gate applies to a delete and to a correction', async () => {
+  const { mock, wb } = setup();
+  const snap = await wb.load();
+  breakSortedTable(mock);
+  const del = await wb.deleteTransaction(snap.transactions.find(t => t.id === 13));
+  assert.equal(del.deleted, true);
+  assert.equal(del.reportFormatting.blockedBy, 'sorted-table');
+  assert.deepEqual(del.formattedMonths, []);
+  assert.equal(del.reportFormatting.message, REPORT_FORMATTING_DELETED);
+  const fresh = (await wb.load()).transactions.find(t => t.id === 5);
+  const corrected = await wb.updateTransaction(fresh, { amount: '380' });
+  assert.equal(corrected.amount, 380);
+  assert.equal(corrected.reportFormatting.blockedBy, 'sorted-table');
+  assert.deepEqual(corrected.formattedMonths, []);
+  assert.deepEqual(visibilityWrites(mock), [], 'still no report row touched');
+});
+
+test('W1: the retry repairs the helper table first, then formats, and never touches the transaction table', async () => {
+  const { mock, wb } = setup();
+  await wb.load();
+  breakSortedTable(mock);
+  const res = await wb.addTransaction(entry({ date: '2026-09-06' }), { marker: makeMarker() });
+  assert.equal(res.reportFormatting.blockedBy, 'sorted-table');
+  mock.beforeRespond = null;                                   // the helper table can be written again
+  const from = mock.log.length;
+  const retry = await wb.finishReportRows(res.reportFormatting.months);
+  assert.equal(retry.ok, true);
+  assert.equal(retry.repairedSortedTable, true, 'it rebuilt the helper table as part of finishing');
+  assert.deepEqual(visibleReportRows(mock, 'September'), [4]);
+  const touched = mock.log.slice(from);
+  assert.deepEqual(touched.filter(e => e.method !== 'GET' && /LOG_Table/.test(e.url) && !/LOG_Sorted/.test(e.url)), [], 'never writes the transaction table');
+  assert.equal(nonBlank(mock.table('LOG_Table').rows).length, 13, 'still one transaction added, not two');
+  const again = await wb.finishReportRows([9]);
+  assert.equal(again.ok, true);
+  assert.deepEqual(visibleReportRows(mock, 'September'), [4], 'running it twice changes nothing');
+});
+
+test('W1: a month sheet re-protected against row formatting is reported, with the reason read from the workbook', async () => {
+  const { mock, wb } = setup();
+  await wb.load();
+  mock.setAllowFormatRows('September', false);
+  const res = await wb.addTransaction(entry({ date: '2026-09-06' }), { marker: makeMarker() });
+  assert.equal(res.txn.id, 14, 'the transaction is still saved');
+  assert.ok(res.reportFormatting && res.reportFormatting.pending);
+  assert.equal(res.reportFormatting.blockedBy, 'formatting', 'not the helper table this time');
+  assert.match(res.reportFormatting.detail, /Format rows/, 'the message names the protection setting');
+  assert.match(res.reportFormatting.detail, /Graph cannot supply a password/);
+  assert.equal(wb.halted, null);
 });

@@ -9,6 +9,39 @@ or in the repository; nothing has connected to Microsoft 365; no production work
 
 ---
 
+## 2026-09-12 (later) — Review fixes W1 and W2 on the report-row work. **For review; not published, no live write**
+
+Codex reviewed `9e464cd` and found two defects. Both are fixed, with regression tests that fail against the
+previous code.
+
+| # | Finding | Fix | Regression evidence |
+|---|---|---|---|
+| W1 | Formatting ran even when the sorted helper table came back unverified, so rows could be set from stale report figures and then reported as complete (`reportFormatting: null`, `formattedMonths: [9]`) | `_finishReportRows(months, sortedConsistent)` now gates every write path. When the helper table is not verified, **no visibility request is sent**, the months are recorded as unfinished with `blockedBy: 'sorted-table'`, and `formattedMonths` is empty. The retry `finishReportRows()` rebuilds the helper table first and only then formats, and the banner says which of the two it is doing | Unit: an add, a delete and a correction under a helper table that cannot be written all leave the report rows untouched and name the reason; the retry repairs then formats and is idempotent; a month sheet re-protected against row formatting is reported with the setting named |
+| W2 | The months were recorded only after the operation returned, so closing or reloading between the transaction landing and the formatting returning lost the unfinished work, worst of all after a delete | The months are written **before the first workbook change** and cleared **only after verified completion**. A call that provably writes nothing (ignored submit, conflict) releases its reservation. A storage refusal is now surfaced to the member instead of swallowed, and the page keeps the record in memory for the rest of the visit | Browser: holding the visibility request open, reloading mid-operation, and finding the work still offered afterwards with zero writes at startup; plus an ordinary save showing no banner, and a stubbed storage failure producing a visible message while the save still succeeds |
+
+Also in this pass, at the reviewer's direction:
+- **Removed the advice to press a workbook button for recovery.** Run SubmitEntry and Run DeleteTransaction
+  change transactions; recommending them as a formatting repair was wrong. Recovery is now: allow "Format rows"
+  again in Excel and press Finish report formatting, or show the rows by hand. `RefreshReports` is not
+  recommended until its source has been reviewed here.
+- **The local copy's protection does not prove the online copy's.** Said so in the mapping and made it an
+  explicit live check in the runbook: the first save that formats rows either succeeds, or is refused and the
+  app reads the protection back and names the setting.
+- **`RefreshReports` has still not reached me.** Cody will paste it; it will be saved beside the other scripts
+  in the git-ignored `data/office-scripts/` and reviewed then.
+
+### Tests (2026-09-12, this folder)
+- `npm test`: **141 passed, 0 failed** (was 137).
+- `npx playwright test`: **183 passed, 0 failed** (was 177) = 61 per project × 3.
+- `npm run verify:config`: 21 passed.
+- One existing browser assertion was corrected rather than the code: the retry may now read the transaction
+  table and repair the helper table, so the test asserts the sharper property, that it never **writes**
+  `LOG_Table`.
+
+Still not published, and no live write has been run.
+
+---
+
 ## 2026-09-12 — Monthly report rows are now updated by the app. **For review; not published, no live write run**
 
 A transaction saved from the website used to land in a month-sheet row that an earlier Office Script run had
@@ -53,10 +86,11 @@ than damage to a record; that is deliberately different from an incident. "Check
 a reload remain read-only and are unrelated to this.
 
 **Protection recovery, stated honestly.** If the month sheets are ever re-protected with "Format rows"
-disallowed, the PATCH fails and the member sees the message above, and **the app cannot repair it**: Graph
-cannot supply a password to unprotect, and silently changing a protection option is not something this app
-should do. Recovery is manual in Excel: allow "Format rows" again, or press one of the workbook's own buttons
-once, which runs `refreshMonthlyVisibility()` with the workbook's own password.
+disallowed, the PATCH fails and **the app cannot repair it**: Graph cannot supply a password to unprotect, and
+silently changing a protection option is not something this app should do. It does read the sheet's protection
+back to explain the refusal by name. Recovery is manual in Excel: allow "Format rows" again, then press Finish
+report formatting; or show the rows by hand. **Not** by pressing Run SubmitEntry or Run DeleteTransaction,
+which add and delete transactions.
 
 ### The alternative that was assessed
 Leaving all thirty rows visible needs no permission and no writes, and was rejected: every month sheet would

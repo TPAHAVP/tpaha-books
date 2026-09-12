@@ -5,6 +5,9 @@
 // never be written again; only the formatting is outstanding. This record names the months still to do.
 //
 // It holds no workbook content and no password: month numbers and a timestamp, nothing else.
+export class ReportFormattingStorageError extends Error {
+  constructor(message, cause) { super(message); this.name = 'ReportFormattingStorageError'; this.cause = cause; }
+}
 const seg = s => encodeURIComponent(String(s));
 
 export function reportFormattingKey({ tenantId, homeAccountId, workbookId }) {
@@ -29,12 +32,19 @@ export class ReportFormattingStore {
       return months.length ? { ...rec, months } : null;
     } catch { try { this.storage.removeItem(this.key); } catch { /* ignore */ } return null; }
   }
-  /** Adds months still to do. Returns the stored record, or null when there is nothing left. */
-  add(months, message) {
-    const merged = clean([...(this.read()?.months || []), ...clean(months)]);
+  /**
+   * Adds months still to do. Returns the stored record, or null when there is nothing left.
+   * Throws ReportFormattingStorageError when the browser refuses to keep it: a caller must say so rather than
+   * let a member believe the reminder will survive a reload.
+   */
+  add(months, message, blockedBy) {
+    const current = this.read();
+    const merged = clean([...(current?.months || []), ...clean(months)]);
     if (!merged.length) return this.clear();
-    const rec = { months: merged, message: message || this.read()?.message || '', at: new Date().toISOString() };
-    try { this.storage.setItem(this.key, JSON.stringify(rec)); } catch { /* the banner still shows in this page */ }
+    const rec = { months: merged, message: message || current?.message || '', blockedBy: blockedBy || current?.blockedBy || 'formatting', at: new Date().toISOString() };
+    try { this.storage.setItem(this.key, JSON.stringify(rec)); } catch (e) {
+      throw new ReportFormattingStorageError('This browser could not remember that the monthly report rows still need updating (its storage is full or blocked). The reminder is on this page only: if you close or reload it, use Refresh and check the month in Excel.', e);
+    }
     return rec;
   }
   /** Drops months that have since been formatted. Returns what is left, or null. */
@@ -45,7 +55,7 @@ export class ReportFormattingStore {
     const left = current.months.filter(m => !done.has(m));
     if (!left.length) return this.clear();
     const rec = { ...current, months: left };
-    try { this.storage.setItem(this.key, JSON.stringify(rec)); } catch { /* ignore */ }
+    try { this.storage.setItem(this.key, JSON.stringify(rec)); } catch { /* the months left are still shown on this page */ }
     return rec;
   }
   clear() { try { this.storage.removeItem(this.key); } catch { /* ignore */ } return null; }

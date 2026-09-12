@@ -27,6 +27,7 @@ export const MONEY_FORMAT = '$#,##0.00';
 const FORMAT_ROW = [null, null, DATE_FORMAT, null, null, MONEY_FORMAT, null, null, null];
 const SELF_TEST_DESCRIPTION = 'TPAHA Books connection test';
 const MONTH_FIRST_ROW = 4, MONTH_LAST_ROW = 33;   // the transaction rows on every monthly report sheet
+export const REPORT_FORMATTING_BLOCKED_BY_SORTED = 'The sorted helper table the monthly sheets read could not be confirmed, so the report rows were left alone rather than set from figures that may be out of date.';
 export const REPORT_FORMATTING_SAVED = 'Transaction saved. Excel report formatting still needs updating.';
 export const REPORT_FORMATTING_DELETED = 'Transaction deleted. Excel report formatting still needs updating.';
 const SORTED_WARNING = 'The monthly sheets may be out of date: the sorted helper table could not be confirmed. Press Refresh to retry.';
@@ -180,7 +181,7 @@ export function visibilityRuns(populated) {
   return runs;
 }
 /** The record a screen shows when the transaction landed but its report formatting did not finish. */
-const pendingReportFormatting = (vis, message) => (vis.ok ? null : { pending: true, months: vis.months, message, detail: vis.error });
+const pendingReportFormatting = (vis, message) => (vis.ok ? null : { pending: true, months: vis.months, message, detail: vis.error, blockedBy: vis.blockedBy || 'formatting' });
 
 // ---- adapter -----------------------------------------------------------------------------------
 export class LedgerWorkbook {
@@ -383,8 +384,8 @@ export class LedgerWorkbook {
     const u = await this._ensureUniqueNumber(log, txn);
     const sorted = await this._rebuildSorted();
     if (!sorted.consistent) warnings.push(SORTED_WARNING);
-    const vis = await this._syncMonthVisibility([monthOfIso(u.txn.date)]);
-    return { txn: u.txn, alreadyExisted, renumberedFrom: u.renumberedFrom, warnings, reportFormatting: pendingReportFormatting(vis, REPORT_FORMATTING_SAVED), formattedMonths: vis.months };
+    const rep = await this._finishReportRows([monthOfIso(u.txn.date)], sorted.consistent);
+    return { txn: u.txn, alreadyExisted, renumberedFrom: u.renumberedFrom, warnings, reportFormatting: pendingReportFormatting(rep.vis, REPORT_FORMATTING_SAVED), formattedMonths: rep.formatted };
   }
 
   /** Submit Entry. `marker` is the operation id (makeMarker()); it makes checks and retries safe. */
@@ -510,8 +511,8 @@ export class LedgerWorkbook {
     if (!outcome.deleted) throw new VerificationError('delete-unconfirmed', `The delete of #${cur.id} did not reach the workbook; nothing was changed. Try again.`);
     const sorted = await this._rebuildSorted();
     if (!sorted.consistent) outcome.notices.push(SORTED_WARNING);
-    const vis = await this._syncMonthVisibility([monthOfIso(cur.date)]);
-    return { deleted: true, notices: outcome.notices, reportFormatting: pendingReportFormatting(vis, REPORT_FORMATTING_DELETED), formattedMonths: vis.months };
+    const rep = await this._finishReportRows([monthOfIso(cur.date)], sorted.consistent);
+    return { deleted: true, notices: outcome.notices, reportFormatting: pendingReportFormatting(rep.vis, REPORT_FORMATTING_DELETED), formattedMonths: rep.formatted };
   }
 
   /** Correct a transaction: append the corrected copy (same id and timestamp), then delete the old copy with the checked delete. */
@@ -579,8 +580,8 @@ export class LedgerWorkbook {
     if (olds.length === 0) {
       const sorted = await this._rebuildSorted();
       if (!sorted.consistent) warnings.push(SORTED_WARNING);
-      const vis = await this._syncMonthVisibility([monthOfIso(cur.date), monthOfIso(fresh[0].date)]);
-      return { ...fresh[0], warnings, notices: resumed ? [] : ['This record was deleted by someone else while you corrected it; your corrected copy is now the only one.'], reportFormatting: pendingReportFormatting(vis, REPORT_FORMATTING_SAVED), formattedMonths: vis.months };
+      const rep = await this._finishReportRows([monthOfIso(cur.date), monthOfIso(fresh[0].date)], sorted.consistent);
+      return { ...fresh[0], warnings, notices: resumed ? [] : ['This record was deleted by someone else while you corrected it; your corrected copy is now the only one.'], reportFormatting: pendingReportFormatting(rep.vis, REPORT_FORMATTING_SAVED), formattedMonths: rep.formatted };
     }
     const old = olds[0];
     const duplicate = (why, post) => this._halt(new UnresolvedOperationError('duplicate-copy', `Your correction to #${cur.id} is saved, but the old copy could not be removed (${why}). Two copies exist. Nothing more will be written until this is checked; the old copy can be removed explicitly from the details shown.`, { ...detail, copies: (post || log2).txns.filter(t => identityOf(t) === ident).map(publicTxn) }));
@@ -594,19 +595,43 @@ export class LedgerWorkbook {
       const sorted = await this._rebuildSorted();
       if (!sorted.consistent) warnings.push(SORTED_WARNING);
       const result = post.txns.find(t => identityOf(t) === ident && t.fingerprint === newFp) || fresh[0];
-      const vis = await this._syncMonthVisibility([monthOfIso(cur.date), monthOfIso(result.date)]);
-      return { ...result, warnings, notices: outcome.notices, reportFormatting: pendingReportFormatting(vis, REPORT_FORMATTING_SAVED), formattedMonths: vis.months };
+      const rep = await this._finishReportRows([monthOfIso(cur.date), monthOfIso(result.date)], sorted.consistent);
+      return { ...result, warnings, notices: outcome.notices, reportFormatting: pendingReportFormatting(rep.vis, REPORT_FORMATTING_SAVED), formattedMonths: rep.formatted };
     }
     // 'gone': someone removed the old copy between our read and the checked delete
     if (post.txns.filter(t => identityOf(t) === ident).length !== 1) throw duplicate('the copies could not be reconciled', post);
     const sorted = await this._rebuildSorted();
     if (!sorted.consistent) warnings.push(SORTED_WARNING);
     const result = post.txns.find(t => identityOf(t) === ident && t.fingerprint === newFp) || fresh[0];
-    const vis = await this._syncMonthVisibility([monthOfIso(cur.date), monthOfIso(result.date)]);
-    return { ...result, warnings, notices: ['The old copy of this record was removed by someone else at the same time.'], reportFormatting: pendingReportFormatting(vis, REPORT_FORMATTING_SAVED), formattedMonths: vis.months };
+    const rep = await this._finishReportRows([monthOfIso(cur.date), monthOfIso(result.date)], sorted.consistent);
+    return { ...result, warnings, notices: ['The old copy of this record was removed by someone else at the same time.'], reportFormatting: pendingReportFormatting(rep.vis, REPORT_FORMATTING_SAVED), formattedMonths: rep.formatted };
   }
 
   // ---- monthly report row visibility -----------------------------------------------------------
+  /**
+   * Finishes a write by bringing the monthly report rows in line, but only when the sorted helper table those
+   * rows are computed from has been verified. Formatting from an unverified helper table would hide or show the
+   * wrong rows and then report success, so the months are recorded as unfinished work instead (review W1).
+   * Returns { vis, formatted } where `formatted` lists only the months actually brought in line.
+   */
+  async _finishReportRows(months, sortedConsistent) {
+    const wanted = [...new Set((months || []).map(monthOfIso_or_number).filter(x => x >= 1 && x <= 12))].sort((a, b) => a - b);
+    if (!wanted.length) return { vis: { ok: true, months: [], runs: 0 }, formatted: [] };
+    if (!sortedConsistent) return { vis: { ok: false, months: wanted, blockedBy: 'sorted-table', error: REPORT_FORMATTING_BLOCKED_BY_SORTED }, formatted: [] };
+    const vis = await this._syncMonthVisibility(wanted);
+    return { vis, formatted: vis.ok ? vis.months : [] };
+  }
+  /**
+   * The explicit retry behind "Finish report formatting". It repairs the sorted helper table first when that is
+   * what is blocking, then formats. It writes to LOG_Sorted_Table and the month sheets and **never to
+   * LOG_Table**, so it cannot add, change or remove a transaction however often it runs.
+   */
+  async _retryReportRows(months) {
+    const sorted = await this._rebuildSorted();
+    if (!sorted.consistent) return { ok: false, months: [...new Set((months || []).map(monthOfIso_or_number).filter(x => x >= 1 && x <= 12))].sort((a, b) => a - b), blockedBy: 'sorted-table', error: REPORT_FORMATTING_BLOCKED_BY_SORTED };
+    const vis = await this._syncMonthVisibility(months);
+    return { ...vis, repairedSortedTable: sorted.changed };
+  }
   /**
    * Makes each monthly report sheet show exactly its populated rows, by the same rule the workbook's own
    * `refreshMonthlyVisibility()` uses: a row between 4 and 33 is shown when its date cell holds a value and
@@ -648,9 +673,22 @@ export class LedgerWorkbook {
         }
       }
     } catch (e) {
-      return { ok: false, months: wanted, error: e.message };
+      return { ok: false, months: wanted, error: `${e.message}${await this._whyVisibilityRefused(e, wanted)}` };
     }
     return { ok: true, months: wanted, runs };
+  }
+  /** On a refusal, ask the workbook whether the sheet's protection still allows row formatting. Read-only. */
+  async _whyVisibilityRefused(error, months) {
+    if (!(error instanceof ExcelApiError) || error.status !== 403) return '';
+    for (const m of months) {
+      try {
+        const p = await this.client.getWorksheetProtection(MONTH_NAMES[m - 1]);
+        if (p && p.protected && p.options && p.options.allowFormatRows === false) {
+          return ` The ${MONTH_NAMES[m - 1]} sheet is protected with "Format rows" disallowed, which is what blocks this. It has to be allowed again in Excel; this app does not change a sheet's protection, and Microsoft Graph cannot supply a password to unprotect one.`;
+        }
+      } catch { /* the explanation is a courtesy; the refusal stands either way */ }
+    }
+    return '';
   }
 
   // ---- explicit repairs (member-confirmed, allowed while paused) ----------------------------
@@ -800,6 +838,7 @@ export class LedgerWorkbook {
   reappendRow(values, opts) { return this._exclusive(() => this._reappendRow(values, opts)); }
   rebuildSorted() { return this._exclusive(() => this._rebuildSorted()); }
   syncMonthVisibility(months, opts) { return this._exclusive(() => this._syncMonthVisibility(months, opts)); }
+  finishReportRows(months) { return this._exclusive(() => this._retryReportRows(months)); }
   setPriorYearBalance(value, expectedCurrent) { return this._exclusive(() => this._setPriorYearBalance(value, expectedCurrent)); }
 
   // ---- self-test (test copy only) -------------------------------------------------------------

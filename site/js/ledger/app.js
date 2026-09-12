@@ -17,12 +17,12 @@ import { initAuth } from '../auth.js';
 import { ExcelClient } from '../workbook/excel-client.js';
 import { MockWorkbook } from '../workbook/mock-excel.js';
 import { SAMPLE_WORKBOOK } from '../workbook/sample-workbook.js';
-import { LedgerWorkbook, ConflictError, VerificationError, UnresolvedOperationError, identityOf, makeMarker } from '../workbook/ledger-workbook.js';
+import { LedgerWorkbook, ConflictError, VerificationError, UnresolvedOperationError, identityOf, makeMarker, monthOfIso } from '../workbook/ledger-workbook.js';
 import { findCandidates, rememberWorkbook, recallWorkbook, forgetWorkbook, resolveConfigured, workbookKey } from '../workbook/locate.js';
 import { SaveController } from '../save/save-controller.js';
 import { draftKey, DraftStore, DraftStorageError, installUnloadGuard, clearDraftsForAccount, combineDrafts } from '../save/drafts.js';
 import { incidentKey, IncidentStore } from '../save/incidents.js';
-import { reportFormattingKey, ReportFormattingStore } from '../save/report-formatting.js';
+import { reportFormattingKey, ReportFormattingStore, ReportFormattingStorageError } from '../save/report-formatting.js';
 import { createTabGuard } from '../save/tab-guard.js';
 import { h, toast, confirmDialog, setupTabs, fmtMoney, fmtDate, todayIso, signInGate } from '../ui.js';
 import { MONTH_NAMES, CATEGORIES, DEPOSIT_CATEGORIES, WITHDRAWAL_CATEGORIES, validateEntry, monthView, annualView, toCents } from './model.js';
@@ -40,7 +40,7 @@ const state = {
   entryCtl: null, editCtl: null, editingRef: null, drafts: null, draftWarned: false,
   settingsDirty: false, settingsSaving: false,
   incidents: null, repaired: new Set(), lastChecks: null,
-  reportFmt: null, reportFmtRec: null,
+  reportFmt: null, reportFmtRec: null, reportFmtWarned: false,
   tabGuard: null, secondaryTab: false,
 };
 
@@ -345,8 +345,10 @@ function buildEntryForm() {
     showErrors(form, check.ok ? {} : check.errors);
     if (!check.ok) return;
     if (!same(v, state.entryCtl.draft)) state.entryCtl.edit(v);   // an unchanged form is not a new edit
+    const reserved = reserveReportFormatting([monthOfIso(v.date)]);
     const r = await state.entryCtl.submit();
-    if (!r.ignored) afterEntrySave(r);
+    if (r.ignored) { releaseReportFormatting(reserved); return; }
+    afterEntrySave(r, reserved);
   });
 }
 function afterEntryCheck(c) {
@@ -355,7 +357,7 @@ function afterEntryCheck(c) {
   else if (c.error instanceof UnresolvedOperationError) showIncident();
   else if (c.error) toast(`Could not check the workbook: ${c.error.message}`, 'error');
 }
-async function afterEntrySave(r) {
+async function afterEntrySave(r, reserved = []) {
   if (!r || r.ignored) return;
   const c = state.entryCtl;
   const form = $('#entry-form');
@@ -382,6 +384,7 @@ async function afterEntrySave(r) {
     toast(r.error.message, 'error');
     await reload();
   }
+  if (state.entryCtl.state === 'conflict') releaseReportFormatting(reserved);   // refused before anything was written
 }
 
 // ---- list ----------------------------------------------------------------------------------
@@ -435,6 +438,7 @@ async function deleteTxn(t) {
   const ok = await confirmDialog(`Delete transaction ${describeTxn(t)} from the workbook?`, { okLabel: 'Delete from workbook', danger: true });
   if (!ok) return;
   if (!writeAllowed()) return;                           // something may have started while the dialog was open
+  const reserved = reserveReportFormatting([monthOfIso(t.date)]);
   try {
     const r = await withBusy(() => state.wb.deleteTransaction(t));
     noteReportFormatting(r);
@@ -442,7 +446,7 @@ async function deleteTxn(t) {
     for (const n of r.notices || []) toast(n, 'info');
     await reload();
   } catch (e) {
-    if (e instanceof ConflictError) conflictDialog(e, { onReload: () => reload() });
+    if (e instanceof ConflictError) { releaseReportFormatting(reserved); conflictDialog(e, { onReload: () => reload() }); }
     else if (e instanceof UnresolvedOperationError) showIncident();
     else { toast(e.message, 'error'); await reload(); }
   }
@@ -572,16 +576,42 @@ async function repairRemoveCopy(copy, key, { allowIdentical = false } = {}) {
 }
 
 // ---- unfinished monthly report formatting ----------------------------------------------------
+const REPORT_INTERRUPTED = 'A change was interrupted before the monthly report rows were updated. Your transactions are unaffected; only which rows the monthly sheets show may be out of date.';
 /**
- * Records what a finished operation managed to format and what it did not, then shows it. This never runs
- * anything: a member presses the button. The transaction itself is already in the workbook, and the retry
- * cannot write to the transaction table at all, so it can never add one twice.
+ * Written BEFORE the first workbook change, not after it (review W2). If this page closes between the
+ * transaction landing and the formatting finishing, the months are already recorded and the next visit offers
+ * to finish them. Nothing is rendered here, so an ordinary save shows no banner on its way past. Returns the
+ * months reserved, so a call that turns out to write nothing can release them again.
+ */
+function reserveReportFormatting(months) {
+  const wanted = [...new Set((months || []).filter(m => m >= 1 && m <= 12))];
+  if (!wanted.length || !state.reportFmt) return [];
+  try { state.reportFmtRec = state.reportFmt.add(wanted, REPORT_INTERRUPTED, 'interrupted'); }
+  catch (e) {
+    if (e instanceof ReportFormattingStorageError && !state.reportFmtWarned) { state.reportFmtWarned = true; toast(e.message, 'error'); }
+    state.reportFmtRec = { months: wanted, message: REPORT_INTERRUPTED, blockedBy: 'interrupted' };   // this page still knows
+  }
+  return wanted;
+}
+/** Drops a reservation for an operation that provably wrote nothing. */
+function releaseReportFormatting(months) {
+  if (!months || !months.length || !state.reportFmt) return;
+  state.reportFmtRec = state.reportFmt.remove(months);
+  renderReportBanner();
+}
+/**
+ * Records what a finished operation managed to format and what it did not, then shows it. Months are cleared
+ * only on verified completion. This never runs anything: a member presses the button.
  */
 function noteReportFormatting(result) {
   if (!result || !state.reportFmt) return;
   const unfinished = result.reportFormatting;
-  if (unfinished && unfinished.pending) state.reportFmtRec = state.reportFmt.add(unfinished.months, unfinished.message);
-  else if (result.formattedMonths) state.reportFmtRec = state.reportFmt.remove(result.formattedMonths);
+  try {
+    if (unfinished && unfinished.pending) state.reportFmtRec = state.reportFmt.add(unfinished.months, unfinished.message, unfinished.blockedBy);
+    else if (result.formattedMonths) state.reportFmtRec = state.reportFmt.remove(result.formattedMonths);
+  } catch (e) {
+    if (e instanceof ReportFormattingStorageError && !state.reportFmtWarned) { state.reportFmtWarned = true; toast(e.message, 'error'); }
+  }
   renderReportBanner();
 }
 function renderReportBanner() {
@@ -591,9 +621,12 @@ function renderReportBanner() {
   if (!rec) { b.hidden = true; b.replaceChildren(); return; }
   const names = rec.months.map(m => MONTH_NAMES[m - 1]).join(', ');
   const sheets = rec.months.length === 1 ? 'the monthly report sheet' : 'the monthly report sheets';
+  const what = rec.blockedBy === 'sorted-table'
+    ? `The sorted helper table that ${sheets} for ${names} read could not be confirmed, so the rows were left alone rather than set from figures that may be out of date. Finishing will rebuild that helper table first, then set the rows.`
+    : `What is left is only which rows are shown on ${sheets} for ${names}. Until it is done, a transaction can sit in a hidden row when that sheet is opened or printed in Excel, even though this website shows it.`;
   b.replaceChildren(
     h('strong', {}, rec.message || 'Excel report formatting still needs updating.'),
-    h('p', { className: 'small' }, `What is left is only which rows are shown on ${sheets} for ${names}. Until it is done, a transaction can sit in a hidden row when that sheet is opened or printed in Excel, even though this website shows it. Your transaction is in the workbook and is never written again by this.`),
+    h('p', { className: 'small' }, `${what} Your transactions are not touched by this: finishing writes to the helper table and the monthly sheets only, never to the transaction table, so it cannot add or remove a transaction however many times it runs.`),
     h('div', { className: 'row' }, h('button', { type: 'button', className: 'btn btn-primary btn-finish-report', onClick: finishReportFormatting }, 'Finish report formatting')));
   b.hidden = false;
 }
@@ -601,9 +634,14 @@ async function finishReportFormatting() {
   if (!state.reportFmtRec || !writeAllowed()) return;
   const months = state.reportFmtRec.months;
   try {
-    const r = await withBusy(() => state.wb.syncMonthVisibility(months));
-    if (r.ok) { state.reportFmtRec = state.reportFmt.remove(months); toast('Excel report formatting finished.'); }
-    else toast(`Still not finished: ${r.error}`, 'error');
+    const r = await withBusy(() => state.wb.finishReportRows(months));
+    if (r.ok) {
+      state.reportFmtRec = state.reportFmt.remove(months);
+      toast(r.repairedSortedTable ? 'Helper table rebuilt and Excel report formatting finished.' : 'Excel report formatting finished.');
+    } else {
+      try { state.reportFmtRec = state.reportFmt.add(months, state.reportFmtRec.message, r.blockedBy); } catch { /* already shown on this page */ }
+      toast(`Still not finished: ${r.error}`, 'error');
+    }
   } catch (e) {
     toast(`Still not finished: ${e.message}`, 'error');
   }
@@ -642,8 +680,10 @@ function buildEditDialog() {
     showErrors(form, check.ok ? {} : check.errors);
     if (!check.ok) return;
     if (!same(v, state.editCtl.draft)) state.editCtl.edit(v);
+    const reserved = reserveReportFormatting([monthOfIso(state.editingRef && state.editingRef.date), monthOfIso(v.date)]);
     const r = await state.editCtl.submit();
-    if (!r.ignored) afterEditSave(r);
+    if (r.ignored) { releaseReportFormatting(reserved); return; }
+    afterEditSave(r, reserved);
   });
   $('#btn-edit-cancel').addEventListener('click', cancelEdit);
   dlg.addEventListener('cancel', e => { e.preventDefault(); cancelEdit(); });   // Escape goes through the same check
@@ -728,7 +768,7 @@ function afterEditCheck(c) {
   else if (c.error instanceof UnresolvedOperationError) showIncident();
   else if (c.error) toast(`Could not check the workbook: ${c.error.message}`, 'error');
 }
-async function afterEditSave(r) {
+async function afterEditSave(r, reserved = []) {
   if (!r || r.ignored) return;
   const c = state.editCtl;
   if (r.ok) {
@@ -755,6 +795,7 @@ async function afterEditSave(r) {
     toast(r.error.message, 'error');
     await reload();
   }
+  if (state.editCtl.state === 'conflict') releaseReportFormatting(reserved);   // nothing was written
 }
 
 // ---- months and annual (workbook figures) ------------------------------------------------

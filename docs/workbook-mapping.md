@@ -305,9 +305,17 @@ password-protected sheet, and even if it could, re-protecting would silently dro
 The month sheets are protected with row formatting **allowed**, which is precisely the permission needed to
 hide and show a row. So the unprotect step is not needed at all.
 
+**This is the local copy, and it does not prove the online one.** The pilot workbook may carry different
+protection. There is no need to guess: the first save that formats rows on the online copy either succeeds, in
+which case row formatting is allowed there too, or is refused, in which case the app reads the sheet's
+protection back and says so in as many words. The runbook makes that the live check.
+
 ### The approach taken
 After the transaction and the sorted helper table are verified, and only then:
 
+0. Only once the sorted helper table has been **verified**. The report rows are formulas over that table, so
+   formatting from an unverified one would hide or show the wrong rows and then report success. When it cannot
+   be verified, nothing is touched and the months are recorded as unfinished work instead.
 1. `POST …/workbook/application/calculate` once, so the report formulas reflect the change before they are read.
 2. For each affected month (the month of an added or deleted transaction; **both** months for a correction that
    moves one): `GET …/worksheets('<Month>')/range(address='A4:A33')?$select=address,values`.
@@ -322,19 +330,28 @@ changes, which is why the retry below cannot duplicate a transaction however oft
 same operation queue and the same single-writer tab guard as everything else, and never on page load.
 
 ### When it does not finish
+The months affected are written into this browser **before the first workbook change**, not after it, so a page
+closed midway still knows what is outstanding; they are cleared only once the formatting is verified. If the
+browser refuses to keep that record, the member is told plainly rather than left believing it was kept.
+
 The transaction is already in the workbook and is never written again. The screen says **"Transaction saved.
 Excel report formatting still needs updating."** (for a delete, "Transaction deleted."), the months still to do
-are kept in this browser so a reload does not forget them, and a **Finish report formatting** button runs only
-step 1 to 4 above for those months. Saving is not paused: unfinished formatting is cosmetic, not damage to a
+are kept in this browser so a reload does not forget them, and a **Finish report formatting** button finishes
+them. That button repairs the sorted helper table first when that is what is blocking, then
+formats; the banner says which of the two it is. Either way it writes to the helper table and the month sheets
+only and **never to `LOG_Table`**, so it cannot add or remove a transaction however often it runs. Saving is not paused: unfinished formatting is cosmetic, not damage to a
 record. "Check workbook" and the check that runs after a reload stay read-only and have nothing to do with it.
 
 ### The limitation that remains
 This depends on the month sheets keeping "Format rows" allowed. If someone re-protects them with that
-disallowed, the `PATCH` fails, the member sees the message above, and **the app cannot repair it**: Graph
-cannot supply a password to unprotect, and changing a protection option is not something this app should do
-uninvited. The recovery is manual, in Excel: allow "Format rows" again on the month sheets, or press the
-workbook's own Run SubmitEntry / Run DeleteTransaction button once, which runs `refreshMonthlyVisibility()`
-with the password from the workbook.
+disallowed, the `PATCH` fails and **the app cannot repair it**: Graph cannot supply a password to unprotect,
+and changing a protection option is not something this app should do uninvited. The app says so in the message,
+naming the sheet and the setting, because it reads the protection back to explain the refusal.
+
+The recovery is manual, in Excel: allow "Format rows" again on the month sheets, then press **Finish report
+formatting** on the website. Rows can also be shown by hand in Excel. **Do not tell anyone to press Run
+SubmitEntry or Run DeleteTransaction for this**: those buttons add and delete transactions. `RefreshReports`
+may be the right tool, but its source has not been reviewed here and it should not be recommended until it has.
 
 ### The alternative that was assessed and not taken
 Leaving all thirty report rows visible on every month sheet would need no protection permission and no

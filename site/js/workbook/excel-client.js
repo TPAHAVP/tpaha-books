@@ -208,5 +208,6 @@ export class ExcelClient {
   getTableRowRange(table, index) { return this.request('GET', this.rowRangePath(table, index)); }
   patchTableRowRange(table, index, props) { return this.request('PATCH', this.rowRangePath(table, index), { body: props }); }
   calculate(type = 'Full') { return this.request('POST', '/workbook/application/calculate', { body: { calculationType: type } }); }
+  getWorksheetProtection(sheet) { return this.request('GET', `/workbook/worksheets/${enc(sheet)}/protection`); }
   getItemMeta() { return this.request('GET', '?$select=id,name,size,lastModifiedDateTime,webUrl,eTag,file,parentReference', { session: false }); }
 }
