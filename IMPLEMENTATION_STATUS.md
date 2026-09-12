@@ -9,6 +9,57 @@ or in the repository; nothing has connected to Microsoft 365; no production work
 
 ---
 
+## 2026-09-12 (fourth) — `RefreshReports` supplied and reviewed. **No code change; not published, no live write**
+
+Codex approved `68db038` (W2b). Cody then supplied the fourth Office Script. It is saved beside the other three
+in the git-ignored `data/office-scripts/`, and it has been read in full.
+
+### What it does
+`main()` reads `LOG_Table`, runs `validateLog`, writes `LOG_Sorted_Table` with `writeRows(sorted,
+ordered(rows))`, recalculates, runs `verifySorted`, then `refreshMonthlyVisibility()`, and prints "Reports
+refreshed. No transactions were added or deleted." It calls neither `addRow` nor `deleteRowsAt` on
+`LOG_Table`. The claim in its own output matches its code.
+
+### What it confirms
+- **The row rule this app implements is the workbook's own rule**, not an inference: rows 4–33 of all twelve
+  month sheets, hidden exactly when the row's date cell in column A is empty. `refreshMonthlyVisibility()` is
+  the behaviour `_syncMonthVisibility()` reproduces over Graph.
+- **The ported helpers are right.** The shared block appears a third time here; `diff -w` against SubmitEntry's
+  copy is empty, so the ports in `tests/unit/ledger-workbook.test.js` are now checked against three copies.
+- **Why the script needs the password and this app does not.** It unprotects each month sheet, sets the rows,
+  and re-protects with `getSavedOptions()`. This app never unprotects: it relies on the month sheets allowing
+  row formatting, which the local copy does. Still unproven on the online copy — Part 2b of the runbook.
+
+### What it changes
+1. **The recovery guidance now has a reviewed name.** Previously: allow "Format rows" again by hand, or show
+   rows manually, with `RefreshReports` explicitly *not* recommended because it was unread. Now **Run
+   RefreshReports** is the documented repair when the month rows are wrong and the website cannot fix them —
+   it is the one workbook button that changes no transactions. Run SubmitEntry and Run DeleteTransaction remain
+   off-limits for this.
+2. **A new live-test rule.** `RefreshReports` is still a writer: it rewrites `LOG_Sorted` and every month
+   sheet's row visibility. Pressing it during a website save is a second writer on the same tables. The runbook
+   now says to press it only when no save is in flight, and to record that it was needed.
+3. **The hidden-month-row decision is closed.** It was "accept the limitation or build it"; it was built, and
+   `RefreshReports` is the fallback rather than the plan.
+4. **The separate script-identity check is no longer blocked on an unread script.** All four have been read; it
+   now waits only on Cody's authorisation.
+
+### One divergence found, not yet fixed
+`writeRows()` keeps `LOG_Sorted_Table` at **at least one body row**, blank when there are no transactions
+(`Math.max(1, rows.length)`). This app's `_rebuildSorted()` deletes down to **zero** rows in that case.
+Verified against the mock: deleting all thirteen sample transactions leaves `LOG_Table` with one blank row and
+`LOG_Sorted_Table` with none.
+
+Its reach is small and it cannot arise in the pilot — the workbook holds 25 transactions and the test plan never
+empties it — but it is a real difference from the workbook's own invariant, and what a zero-row table does to
+the month sheets' formulas, or to Graph's `dataBodyRange`, has not been tested. Recommended fix: match the
+script and leave one blank row. **Not done in this pass**, which was documentation; it needs a code change, a
+test and a review.
+
+No code changed. Tests unchanged from `68db038`: 146 unit, 189 browser, 21 config.
+
+---
+
 ## 2026-09-12 (third) — Review fix W2b: a conflicting operation no longer erases older unfinished work. **For review; not published, no live write**
 
 Codex reviewed `d5a0faa`, accepted W1, and found that W2 was still wrong in one case. Reproduced exactly as
@@ -66,13 +117,14 @@ previous code.
 Also in this pass, at the reviewer's direction:
 - **Removed the advice to press a workbook button for recovery.** Run SubmitEntry and Run DeleteTransaction
   change transactions; recommending them as a formatting repair was wrong. Recovery is now: allow "Format rows"
-  again in Excel and press Finish report formatting, or show the rows by hand. `RefreshReports` is not
-  recommended until its source has been reviewed here.
+  again in Excel and press Finish report formatting, or show the rows by hand. (`RefreshReports` was reviewed on
+  2026-09-12 and is now the recommended repair — see the entry above.)
 - **The local copy's protection does not prove the online copy's.** Said so in the mapping and made it an
   explicit live check in the runbook: the first save that formats rows either succeeds, or is refused and the
   app reads the protection back and names the setting.
-- **`RefreshReports` has still not reached me.** Cody will paste it; it will be saved beside the other scripts
-  in the git-ignored `data/office-scripts/` and reviewed then.
+- **`RefreshReports`** has since arrived and been reviewed (2026-09-12, the entry above). It confirms the row
+  rule and becomes the documented repair; the guidance in this entry was written before that and is superseded
+  there.
 
 ### Tests (2026-09-12, this folder)
 - `npm test`: **141 passed, 0 failed** (was 137).
@@ -134,7 +186,8 @@ disallowed, the PATCH fails and **the app cannot repair it**: Graph cannot suppl
 silently changing a protection option is not something this app should do. It does read the sheet's protection
 back to explain the refusal by name. Recovery is manual in Excel: allow "Format rows" again, then press Finish
 report formatting; or show the rows by hand. **Not** by pressing Run SubmitEntry or Run DeleteTransaction,
-which add and delete transactions.
+which add and delete transactions. (Since 2026-09-12, Run RefreshReports is also a reviewed repair: it changes
+no transactions. See the entry above.)
 
 ### The alternative that was assessed
 Leaving all thirty rows visible needs no permission and no writes, and was rejected: every month sheet would

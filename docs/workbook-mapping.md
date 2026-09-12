@@ -244,20 +244,34 @@ satisfy both:
   the month sheets, so a transaction it adds can land in a row left hidden by an earlier script run. The web
   pages are unaffected, because they read the cells directly whether hidden or not, but **someone opening or
   printing that month sheet in Excel could miss the row** until a script button is pressed. A decision for the
-  board, not taken here. Either accept it with a documented manual report-refresh step, using `RefreshReports`
-  once its source has been reviewed and it is confirmed to reveal populated rows, checking the resulting Excel
-  view or printout before relying on it; or have this app unhide rows, which would be a separate implementation
-  change needing its own tests and review, and would mean writing to protected sheets using the password below.
+  board. **Since taken, and built:** the app now sets those rows itself (§8), and `RefreshReports` — reviewed
+  2026-09-12 — is the manual fallback when it cannot. The app needs no password to do it, because the month
+  sheets allow row formatting; the script uses the password only because it unprotects first.
   Telling members to press Submit or Delete merely to refresh visibility is not acceptable: those buttons change
   data.
 - **Thirty transactions a month.** SubmitEntry refuses to add a 31st transaction in a month. This app allows it
   and warns that the month sheet displays at most 30. A 31st added here does not fail the scripts' checks, but
   SubmitEntry will then refuse to add more in that month.
 
-**Not yet seen:** a fourth script, `RefreshReports`, is named in the other two scripts' error messages ("Run
-RefreshReports before entering or deleting transactions"). Its source has not been read. It presumably rebuilds
-`LOG_Sorted` and the month-row visibility, so it should be reviewed before the pilot in case it also writes
-`LOG_Sorted`.
+**The fourth script, `RefreshReports`, read on 2026-09-12.** It is the repair button the other two scripts point
+at ("Run RefreshReports before entering or deleting transactions"), and it does exactly four things: rebuild
+`LOG_Sorted` from `LOG` with `writeRows(sorted, ordered(rows))`, recalculate, `verifySorted`, and
+`refreshMonthlyVisibility()`. It **never calls `addRow` or `deleteRowsAt` on `LOG_Table`** and prints "No
+transactions were added or deleted."
+
+Two things follow, and both matter here:
+
+- **It is safe to recommend as a repair**, unlike Run SubmitEntry and Run DeleteTransaction. It is the right
+  answer when the month rows are wrong and the website cannot fix them (§8).
+- **It is still a writer.** It rewrites `LOG_Sorted` and the month sheets' row visibility, so pressing it while
+  a website save is in flight is a second writer on the same tables, exactly like the other two buttons.
+
+It also refuses to run at all if `validateLog` fails — every transaction must have a unique positive whole
+number, a date inside the workbook's year, a Deposit/Withdrawal type, a category matching that type in LISTS,
+and a positive amount of at most two decimal places. Anything this app writes must satisfy that or the
+workbook's own buttons stop working; the unit test "every row this app writes passes the scripts' own
+validateLog" covers it, and the ported helpers were re-checked against this third copy of the shared block on
+2026-09-12 — identical apart from indentation.
 
 **Security note, unrelated to this app:** `refreshMonthlyVisibility()` reads the worksheet-protection password
 from a cell on the ENTRY sheet and uses it to unprotect and re-protect each month sheet. That password is
@@ -353,10 +367,14 @@ disallowed, the `PATCH` fails and **the app cannot repair it**: Graph cannot sup
 and changing a protection option is not something this app should do uninvited. The app says so in the message,
 naming the sheet and the setting, because it reads the protection back to explain the refusal.
 
-The recovery is manual, in Excel: allow "Format rows" again on the month sheets, then press **Finish report
-formatting** on the website. Rows can also be shown by hand in Excel. **Do not tell anyone to press Run
-SubmitEntry or Run DeleteTransaction for this**: those buttons add and delete transactions. `RefreshReports`
-may be the right tool, but its source has not been reviewed here and it should not be recommended until it has.
+The recovery is in Excel, and `RefreshReports` is now a reviewed answer for it (§7): that script unprotects each
+month sheet with the workbook's own password, sets rows 4–33 by the same rule this app uses, and re-protects
+with the options it found. It adds and deletes nothing. Press it **only when no website save is in flight**, as
+it writes `LOG_Sorted` and the month sheets.
+
+Two other recoveries work: allow "Format rows" again on the month sheets and press **Finish report formatting**
+on the website, or show the rows by hand in Excel. **Do not tell anyone to press Run SubmitEntry or Run
+DeleteTransaction for this**: those buttons add and delete transactions.
 
 ### The alternative that was assessed and not taken
 Leaving all thirty report rows visible on every month sheet would need no protection permission and no

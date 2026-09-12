@@ -25,15 +25,17 @@ fixed the same day (the app was sorting the helper table by table position where
 transaction number, which would have made the buttons refuse to run after certain corrections). Full record in
 `docs/workbook-mapping.md` §7.
 
-Two items from that review are still open and belong with the decisions below:
+Both items from that review are now closed:
 
-- **`RefreshReports`**, a fourth script named in the others' error messages, has not been read. Copy it the
-  same way and send it before the pilot.
-- **Hidden month rows.** The scripts hide empty month-sheet rows; this app does not unhide them, so a
-  transaction added on the web can stay hidden when that month sheet is opened or printed in Excel. Decide
-  whether to accept that for the pilot, with a documented manual refresh using `RefreshReports` once its source
-  has been reviewed and it is confirmed to reveal populated rows. Check the Excel view or printout before
-  relying on it. Do not press Submit or Delete merely to refresh visibility: those buttons change data.
+- **`RefreshReports`** was supplied and read on 2026-09-12. It rebuilds `LOG_Sorted` from `LOG`, recalculates,
+  verifies, and refreshes month-row visibility. It **adds and deletes no transactions**, so it is the one
+  workbook button that is safe to press as a repair. It is still a writer: press it only when no website save
+  is in flight. Mapping §7.
+- **Hidden month rows.** No longer a standing limitation: the app sets those rows itself after every save,
+  delete and correction, and says so when it cannot (mapping §8). Two things about that are still unproven
+  online and are checked in Part 2b below — that the pilot workbook's month sheets allow row formatting, and
+  that the rows Excel then shows are the right ones. Do not press Submit or Delete to refresh visibility:
+  those buttons change data.
 
 ### C. Two decisions — **accepted by Cody on 2026-09-08**
 - **Writer arrangement: one writer at a time.** One designated tester works at a time; nobody edits the
@@ -112,6 +114,10 @@ same write on December, so if that passed, this is the confirmation in Excel.
 3. Confirm no green band appears. If it does, note its wording, press **Finish report formatting**, and note
    what happens. A message naming "Format rows" means the online copy's protection disallows it; send that
    wording rather than changing any protection setting yourself.
+4. **If the rows are wrong in Excel afterwards** and the website cannot fix them, the repair is **Run
+   RefreshReports** in Excel — reviewed 2026-09-12, it adds and deletes no transactions. Close the website's
+   save first and press it once. Do not press Run SubmitEntry or Run DeleteTransaction: those change
+   transactions. Record that you had to do it, because needing it is itself a result worth reporting.
 4. Open the workbook in Excel again, go to that month sheet, and confirm the new transaction's row is **visible**
    and the blank rows below it are hidden. Use File, Print, Preview and confirm the row appears there too.
 5. Back on the website, delete that transaction. Confirm the website removes it.
@@ -131,8 +137,9 @@ green band cannot be cleared.
 
 ## A separate, separately authorised check: does a script preserve a row's identity?
 
-**Not part of the run above, and not authorised by any review so far.** Do it only when Cody says so, after
-`RefreshReports` and the other scripts have been reviewed, and never while a web page has a save in flight.
+**Not part of the run above, and not authorised by any review so far.** All four scripts have now been read
+(2026-09-12), so the remaining condition is Cody's word: do it only when he says so, and never while a web page
+has a save in flight.
 
 Why it is needed: the scripts rewrite the whole transaction table on every save and delete, including the
 Timestamp text this app uses to recognise its own rows. Nothing tested so far proves that a real Office Script
