@@ -77,11 +77,11 @@ only a Save calls *complete* (or writes the operation if nothing landed).
 |---|---|---|
 | Open / Refresh | `GET /drives/{d}/items/{i}` (name, last modified); `GET …/worksheets('ConfigHidden')/range(address='A1')`; `GET …/worksheets('ENTRY')/range(address='B23')`; `GET …/tables('LISTS_Categories')/dataBodyRange`; `GET …/tables('LOG_Table')/dataBodyRange`; header row read | Column headers checked; blank rows skipped; each row gets a fingerprint. **Integrity scan:** if the same identity appears twice (a copy pasted in Excel, or a correction interrupted on another device) the page records an incident and pauses writes (§3b); a copy that belongs to this page's own unfinished correction is not reported as damage because that correction will finish or report it. A Refresh never lifts a pause. |
 | Search transactions | none (filters the loaded rows) | Refresh re-reads the table. |
-| Add transaction (Submit Entry) | 1 `GET LOG_Table/dataBodyRange`: next number, and "is there already a row with my operation id?" (same content → the earlier attempt landed, finish it; different content → collision, refuse; more than one → incident); 2 `POST LOG_Table/rows/add` with `[[maxId+1, operationId, dateSerial, type, category, amount, description, chequeNum, notes]]`; 3 `GET LOG_Table/dataBodyRange` and find the row by operation id; 4 `PATCH LOG_Table/rows/itemAt(index=n)/range` numberFormat for Date and Amount, single attempt, a failure becomes a warning (values are saved); 5 uniqueness of the number (§3b); 6 rebuild LOG_Sorted | The row with the operation id exists exactly once, its content equals what was sent, its number is unique. |
+| Add transaction (Submit Entry) | …then §8 report row visibility for the month of the new date. 1 `GET LOG_Table/dataBodyRange`: next number, and "is there already a row with my operation id?" (same content → the earlier attempt landed, finish it; different content → collision, refuse; more than one → incident); 2 `POST LOG_Table/rows/add` with `[[maxId+1, operationId, dateSerial, type, category, amount, description, chequeNum, notes]]`; 3 `GET LOG_Table/dataBodyRange` and find the row by operation id; 4 `PATCH LOG_Table/rows/itemAt(index=n)/range` numberFormat for Date and Amount, single attempt, a failure becomes a warning (values are saved); 5 uniqueness of the number (§3b); 6 rebuild LOG_Sorted | The row with the operation id exists exactly once, its content equals what was sent, its number is unique. |
 | Check workbook (after an uncertain add, or automatically after a reload) — **read-only** | `GET LOG_Table/dataBodyRange`; if the row is there: `GET LOG_Table/rows/itemAt(index=n)/range` (number formats) and `GET LOG_Sorted_Table/dataBodyRange` | Outcome `missing` (Save will send it), `landed` (everything confirmed → Saved), `incomplete` (the row is there but formats / number / sorted table are not confirmed → "Not finished", Save finishes them) or `conflict` (another entry carries the id). Zero writes, proven by tests that count requests. |
-| Correct transaction | 1 `GET LOG_Table/dataBodyRange`; locate by identity, compare fingerprint with the loaded copy → mismatch or absent = "Someone else changed this record", nothing written; 2 `POST LOG_Table/rows/add` with the corrected copy (**same TransactionID and Timestamp**); 3 `GET` and verify exactly one corrected copy exists (else incident); 4 numberFormat touch; 5 checked delete of the old copy: `GET LOG_Table/dataBodyRange`, evaluate that the old copy still sits at its index (else re-read and re-aim, up to three times), then `DELETE LOG_Table/rows/{index}`; 6 `GET` and assess by identity (§3b); 7 rebuild LOG_Sorted | Read-back shows one copy with the new fingerprint and none with the old. The corrected row is now the last row of the table (the month sheets sort by date, so their output is unchanged). |
+| Correct transaction | …then §8 report row visibility for **both** the old and the new month. 1 `GET LOG_Table/dataBodyRange`; locate by identity, compare fingerprint with the loaded copy → mismatch or absent = "Someone else changed this record", nothing written; 2 `POST LOG_Table/rows/add` with the corrected copy (**same TransactionID and Timestamp**); 3 `GET` and verify exactly one corrected copy exists (else incident); 4 numberFormat touch; 5 checked delete of the old copy: `GET LOG_Table/dataBodyRange`, evaluate that the old copy still sits at its index (else re-read and re-aim, up to three times), then `DELETE LOG_Table/rows/{index}`; 6 `GET` and assess by identity (§3b); 7 rebuild LOG_Sorted | Read-back shows one copy with the new fingerprint and none with the old. The corrected row is now the last row of the table (the month sheets sort by date, so their output is unchanged). |
 | Check workbook (after an uncertain correction) — **read-only** | `GET LOG_Table/dataBodyRange` (+ formats and sorted-table reads when the corrected copy exists) | `missing` / `landed` / `incomplete` (e.g. "removal of the old copy" still to do; Save finishes it) / `conflict` (record gone or changed by someone else). Whenever a correction completes, the page's stored record for that dialog takes the **corrected row** as its reference, together with any newer text typed meanwhile, so a later Save (or a save after a reload) is compared against the version that actually reached the workbook and not against the one from before (review finding U1). |
-| Delete transaction | 1 `GET LOG_Table/dataBodyRange`; locate + fingerprint check as above; 2 checked delete as in step 5 above; 3 `GET` and assess by identity (§3b); 4 rebuild LOG_Sorted | The fresh read shows exactly the target at the index before the DELETE is sent; afterwards exactly the target is gone. |
+| Delete transaction | …then §8 report row visibility for the month of the deleted date. 1 `GET LOG_Table/dataBodyRange`; locate + fingerprint check as above; 2 checked delete as in step 5 above; 3 `GET` and assess by identity (§3b); 4 rebuild LOG_Sorted | The fresh read shows exactly the target at the index before the DELETE is sent; afterwards exactly the target is gone. |
 | Rebuild LOG_Sorted (internal, after every change) | Up to three rounds of: 1 `GET LOG_Table/dataBodyRange` (fresh; non-blank rows sorted by Date, ties in table order); 2 `GET LOG_Sorted_Table/dataBodyRange`; 3 identical → done; else `PATCH worksheets('LOG_Sorted')/range(address=<overlap>)` values + numberFormat, `POST LOG_Sorted_Table/rows/add` for extra rows or `DELETE LOG_Sorted_Table/rows/{i}` for surplus rows (from the end). After the rounds, one more fresh comparison. | "Consistent" means the sorted table equals the **freshly re-read** LOG at the end. If still inconsistent the app shows "The monthly sheets may be out of date" and Diagnostics reports it; the next change or Refresh rebuilds again. |
 | Month view | `GET …/worksheets('<Month>')/range(address='A2:O40')` | Displayed as the workbook computes it; the app computes the same figures from the loaded rows and flags any difference. |
 | Annual view | `GET …/worksheets('Annual 2026')/range(address='A3:N19')` | Displayed as the workbook computes it; total income, total expenses, net, opening and closing balance are compared with the app's own calculation and any difference is shown. |
@@ -268,3 +268,76 @@ rather than real security, but the treasurer should know it is there.
 
 The source of the three scripts is kept for review in the git-ignored `data/office-scripts/` folder, with a
 note on why it is not in source control.
+
+## 8. Monthly report row visibility
+
+**The problem.** Rows 4 to 33 of each month sheet are formulas over `LOG_Sorted_Table`; a row shows a
+transaction when its date cell has a value and is blank otherwise. The workbook's own scripts finish every save
+by running `refreshMonthlyVisibility()`, which hides the blank rows and shows the rest. This app did not, so a
+transaction it added landed in a row an earlier script run had hidden: correct on the website, missing when the
+month sheet was opened or printed in Excel.
+
+### What Microsoft Graph actually supports (checked 2026-09-12)
+
+| Need | Graph v1.0 | Evidence |
+|---|---|---|
+| Change row visibility | **Yes.** `PATCH …/worksheets/{id}/range(address='A4:A9')` accepts `rowHidden` (Boolean) in the request body, alongside `values`, `formulas` and `numberFormat`. Delegated permission: `Files.ReadWrite` | [Update range](https://learn.microsoft.com/en-us/graph/api/range-update) |
+| Read row visibility back | **Yes.** The same range resource exposes `rowHidden`, which reads true when every row in the range is hidden, false when none is, and null for a mix | [Update range](https://learn.microsoft.com/en-us/graph/api/range-update) |
+| Recalculate | **Yes.** `POST …/workbook/application/calculate` | already in the client |
+| Read the report cells | **Yes.** Ordinary range reads | §3 |
+| Unprotect a sheet **with a password** | **No.** `POST …/protection/unprotect` takes no request body at all | [WorksheetProtection: unprotect](https://learn.microsoft.com/en-us/graph/api/worksheetprotection-unprotect) |
+| Re-protect **with a password** | **No.** `POST …/protection/protect` takes `options` only | [WorksheetProtection: protect](https://learn.microsoft.com/en-us/graph/api/worksheetprotection-protect) |
+| Read the protection options | Yes, but `options` and `protected` are **read-only** | [workbookWorksheetProtection](https://learn.microsoft.com/en-us/graph/api/resources/worksheetprotection) |
+
+Office Scripts and Graph are **not** the same surface. `protection.unprotect(password)` and
+`protection.protect(options, password)` exist in Office Scripts; the Graph equivalents take no password. A
+straight port of `refreshMonthlyVisibility()` is therefore impossible: this app could not unprotect a
+password-protected sheet, and even if it could, re-protecting would silently drop the password.
+
+### What the workbook itself allows (read-only inspection of the local copy, 2026-09-12)
+
+| Sheet | Protected | Password | "Format rows" |
+|---|---|---|---|
+| January … December | yes | **no** | **allowed** |
+| ENTRY | yes | yes | blocked |
+| Annual, LOG, LOG_Sorted, ConfigHidden, LISTS | see §1 | no | blocked or unprotected |
+
+The month sheets are protected with row formatting **allowed**, which is precisely the permission needed to
+hide and show a row. So the unprotect step is not needed at all.
+
+### The approach taken
+After the transaction and the sorted helper table are verified, and only then:
+
+1. `POST …/workbook/application/calculate` once, so the report formulas reflect the change before they are read.
+2. For each affected month (the month of an added or deleted transaction; **both** months for a correction that
+   moves one): `GET …/worksheets('<Month>')/range(address='A4:A33')?$select=address,values`.
+3. Group the rows into runs that share a visibility and `PATCH …/range(address='A<first>:A<last>')` with
+   `{ "rowHidden": true|false }`. A month normally needs two requests: one for the populated block, one for the
+   blank rows below it.
+4. Verify each run by reading `rowHidden` back; a mixed answer, or the wrong one, is a failure.
+
+**It never unprotects a sheet, never reads or writes the cell holding the protection password, never changes a
+protection option, and never touches `LOG_Table` or `LOG_Sorted_Table`.** Row visibility is the only thing it
+changes, which is why the retry below cannot duplicate a transaction however often it runs. It runs inside the
+same operation queue and the same single-writer tab guard as everything else, and never on page load.
+
+### When it does not finish
+The transaction is already in the workbook and is never written again. The screen says **"Transaction saved.
+Excel report formatting still needs updating."** (for a delete, "Transaction deleted."), the months still to do
+are kept in this browser so a reload does not forget them, and a **Finish report formatting** button runs only
+step 1 to 4 above for those months. Saving is not paused: unfinished formatting is cosmetic, not damage to a
+record. "Check workbook" and the check that runs after a reload stay read-only and have nothing to do with it.
+
+### The limitation that remains
+This depends on the month sheets keeping "Format rows" allowed. If someone re-protects them with that
+disallowed, the `PATCH` fails, the member sees the message above, and **the app cannot repair it**: Graph
+cannot supply a password to unprotect, and changing a protection option is not something this app should do
+uninvited. The recovery is manual, in Excel: allow "Format rows" again on the month sheets, or press the
+workbook's own Run SubmitEntry / Run DeleteTransaction button once, which runs `refreshMonthlyVisibility()`
+with the password from the workbook.
+
+### The alternative that was assessed and not taken
+Leaving all thirty report rows visible on every month sheet would need no protection permission and no
+visibility writes. It was rejected: every month sheet would then print thirty rows regardless of content,
+mostly blank, which changes what the treasurer's monthly report looks like on paper. Hiding blank rows is the
+workbook's existing design, and the approach above matches it rather than replacing it.

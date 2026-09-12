@@ -196,3 +196,6 @@ dialog.conflict h3 { color: var(--warn); }
 .banner.halt.resolved { background: #e3f4e8; color: #1d5a30; border-bottom: 1px solid #b9dcc4; }
 .banner.halt .checks { margin: .4rem 0 0 1.1rem; padding: 0; font-size: .9rem; }
 .banner.halt .checks .ok { color: #1d5a30; } .banner.halt .checks .no { color: #8a1f1f; font-weight: 600; } .banner.halt .checks .unknown { color: #6b5a1a; font-weight: 600; }
+.banner.report { background: #eef3e9; color: #33471f; border-bottom: 1px solid #cfdcc0; }
+.banner.report p { margin: .3rem 0 0; }
+.banner.report .row { margin-top: .5rem; }

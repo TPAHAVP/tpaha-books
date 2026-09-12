@@ -97,6 +97,25 @@ version and its time. That is the "before" marker.
    versions the test created, and confirm the transaction table looks untouched and no row described
    *TPAHA Books connection test* remains.
 
+## Part 2b. Live test of the monthly report rows
+
+New in 2026-09-12 and not yet run against the real workbook. Do this only with the write test authorised, since
+it saves and deletes a real transaction on the test copy. The connection test in step 4 already exercises the
+same write on December, so if that passed, this is the confirmation in Excel.
+
+1. Open `TPAHA_2026 (1).xlsx` in Excel and go to a month sheet with few transactions, for example September.
+   Note which of rows 4 to 33 are hidden. Close the workbook so the website is the only writer.
+2. On the website, add one clearly labelled transaction dated in that month. Wait for **Saved to workbook**.
+3. Confirm no green band appears. If it does, press **Finish report formatting** and note what it says.
+4. Open the workbook in Excel again, go to that month sheet, and confirm the new transaction's row is **visible**
+   and the blank rows below it are hidden. Use File, Print, Preview and confirm the row appears there too.
+5. Back on the website, delete that transaction. Confirm the website removes it.
+6. Reopen the workbook in Excel and confirm the row is hidden again and the sheet looks as it did in step 1.
+
+What to send: which rows were hidden at step 1 and step 6, whether the green band appeared, and whether the
+printed preview showed the new row. Stop and report if the row stays hidden in Excel after step 4, or if the
+green band cannot be cleared.
+
 ## Part 3. What to send back for Checkpoint 2
 
 - The read-only check results (all six lines).

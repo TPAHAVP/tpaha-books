@@ -5,6 +5,7 @@ import { ExcelClient, ExcelApiError } from '../../site/js/workbook/excel-client.
 import {
   LedgerWorkbook, ConflictError, VerificationError, UnresolvedOperationError, MarkerCollisionError,
   rowFingerprint, rowToTxn, makeMarker, identityOf, expectedSortedRows, sortedTableMatches,
+  visibilityRuns, monthOfIso, REPORT_FORMATTING_SAVED,
 } from '../../site/js/workbook/ledger-workbook.js';
 import { SAMPLE_WORKBOOK as fixture } from '../../site/js/workbook/sample-workbook.js';
 import { SaveController } from '../../site/js/save/save-controller.js';
@@ -20,7 +21,18 @@ function setup() {
 const memberOn = mock => new LedgerWorkbook(new ExcelClient({ getToken: async () => 't', driveId: 'D1', itemId: 'I1', fetchImpl: (u, o) => mock.fetch(u, o), sleep: async () => {} }));
 const nonBlank = rows => rows.filter(r => r.some(v => v !== '' && v !== null));
 const entry = (over = {}) => ({ date: '2026-09-06', type: 'Deposit', category: 'Membership', amount: '25.50', description: 'Test add', chequeNum: '', notes: '', ...over });
-const noWritesToFormulaSheets = mock => mock.log.filter(e => e.method !== 'GET' && MONTHS_RE.test(e.url));
+const CONTENT_KEYS = ['values', 'formulas', 'numberFormat', 'columnHidden'];
+/** Writes to the formula-driven sheets that would change their CONTENT. Row-visibility PATCHes are not these:
+ *  the month sheets are protected with "format rows" allowed, and the app uses exactly that (mapping §8). */
+const contentWritesToFormulaSheets = mock => mock.log.filter(e => {
+  if (e.method === 'GET' || !MONTHS_RE.test(e.url)) return false;
+  let body = {};
+  try { body = e.body ? JSON.parse(e.body) : {}; } catch { /* not JSON */ }
+  return CONTENT_KEYS.some(k => body[k] !== undefined);
+});
+const visibilityWrites = mock => mock.log.filter(e => e.method === 'PATCH' && MONTHS_RE.test(e.url) && /"rowHidden"/.test(e.body || ''));
+/** Report rows 4..33 of a month sheet that are visible, by the mock's own record. */
+const visibleReportRows = (mock, month) => { const h = new Set(mock.hiddenRows(month)); return [...Array(30).keys()].map(i => i + 4).filter(r => !h.has(r)); };
 const ids = rows => nonBlank(rows).map(r => r[0]);
 const identities = rows => nonBlank(rows).map(r => `${r[0]}|${r[1]}`);
 const bodyJson = async mock => (await mock.fetch('https://graph.microsoft.com/v1.0/drives/D1/items/I1/workbook/tables/LOG_Table/dataBodyRange', {})).json();
@@ -54,7 +66,7 @@ test('rowToTxn, rowFingerprint, identityOf and makeMarker', () => {
 });
 
 // ---------------------------------------------------------------------------------------------- add
-test('addTransaction appends with the next id, sets formats, verifies by read-back, rebuilds LOG_Sorted, touches no formula sheet', async () => {
+test('addTransaction appends with the next id, sets formats, verifies by read-back, rebuilds LOG_Sorted, writes no content to a formula sheet', async () => {
   const { mock, wb } = setup();
   await wb.load();
   const marker = makeMarker();
@@ -74,7 +86,7 @@ test('addTransaction appends with the next id, sets formats, verifies by read-ba
   assert.equal(sorted.at(-1)[1], marker);
   const sep = await wb.readMonth(9);
   assert.equal(sep.subtotal.byCategory.Membership, 25.5);
-  assert.deepEqual(noWritesToFormulaSheets(mock), []);
+  assert.deepEqual(contentWritesToFormulaSheets(mock), []);
   assert.equal(mock.log.filter(e => e.method === 'PATCH' && /rows\/itemAt/.test(e.url)).length, 1, 'formats set exactly once, never retried');
 });
 
@@ -291,7 +303,7 @@ test('S1 (residual race): a shift between the check and the DELETE is detected b
 });
 
 // ---------------------------------------------------------------------------------------------- correct
-test('updateTransaction keeps id and timestamp, applies the change, verifies, leaves one copy, rebuilds LOG_Sorted, never writes a formula sheet', async () => {
+test('updateTransaction keeps id and timestamp, applies the change, verifies, leaves one copy, rebuilds LOG_Sorted, writes no content to a formula sheet', async () => {
   const { mock, wb } = setup();
   const snap = await wb.load();
   const ref = snap.transactions.find(t => t.id === 2);
@@ -305,7 +317,7 @@ test('updateTransaction keeps id and timestamp, applies the change, verifies, le
   assert.equal(nonBlank(rows).length, 12);
   assert.ok(mock.table('LOG_Sorted_Table').rows.some(r => r[0] === 2 && r[6] === 'Corrected description' && r[5] === 91));
   await assert.rejects(() => wb.updateTransaction(ref, { amount: '92' }), e => e instanceof ConflictError && e.reason === 'changed');
-  assert.deepEqual(noWritesToFormulaSheets(mock), []);
+  assert.deepEqual(contentWritesToFormulaSheets(mock), []);
   assert.equal(mock.log.filter(e => e.method === 'PATCH' && /LOG_Table\/rows\/itemAt/.test(e.url) && /"values"/.test(e.body || '')).length, 0, 'no in-place value overwrite of a row by index');
 });
 
@@ -448,7 +460,7 @@ test('selfTest adds one labelled row, removes it, and proves the compared areas 
   assert.ok(report.compared.includes('LOG values and number formats'));
   assert.ok(report.compared.some(x => /formulas/.test(x)));
   assert.deepEqual(mock.snapshot(), before);
-  assert.deepEqual(noWritesToFormulaSheets(mock), []);
+  assert.deepEqual(contentWritesToFormulaSheets(mock), []);
 });
 
 // ---------------------------------------------------------------------------------------------- resuming a correction
@@ -805,4 +817,99 @@ test('V1: a row with no transaction number sorts last within its date and keeps 
   const want = expectedSortedRows(rows);
   assert.equal(want.length, 3, 'the blank row is dropped');
   assert.deepEqual(want.map(r => r[6]), ['has a number', 'no number', 'later date']);
+});
+
+// --------------------------------------------------------------- monthly report row visibility (§8)
+test('visibilityRuns groups consecutive rows, including a gap in the middle', () => {
+  assert.deepEqual(visibilityRuns([true, true, false]), [{ first: 4, last: 5, hidden: false }, { first: 6, last: 6, hidden: true }]);
+  assert.deepEqual(visibilityRuns([true, false, true]), [{ first: 4, last: 4, hidden: false }, { first: 5, last: 5, hidden: true }, { first: 6, last: 6, hidden: false }]);
+  assert.deepEqual(visibilityRuns([]), []);
+  assert.deepEqual(visibilityRuns([false, false]), [{ first: 4, last: 5, hidden: true }]);
+  assert.equal(monthOfIso('2026-09-06'), 9);
+  assert.equal(monthOfIso('2026-12-31'), 12);
+  assert.equal(monthOfIso('nonsense'), 0);
+});
+
+test('§8: adding a transaction shows the populated report rows of its month and hides the rest, touching no other month', async () => {
+  const { mock, wb } = setup();
+  await wb.load();
+  assert.deepEqual(mock.hiddenRows('September'), [], 'nothing hidden to begin with');
+  const res = await wb.addTransaction(entry({ date: '2026-09-06' }), { marker: makeMarker() });
+  assert.equal(res.reportFormatting, null, 'the formatting finished, so nothing is left pending');
+  assert.deepEqual(visibleReportRows(mock, 'September'), [4], 'one transaction: one visible report row');
+  assert.equal(mock.hiddenRows('September').length, 29);
+  assert.deepEqual(mock.hiddenRows('January'), [], 'a different month is not touched');
+  assert.deepEqual(contentWritesToFormulaSheets(mock), [], 'visibility only: no content written to a month sheet');
+  assert.ok(visibilityWrites(mock).length > 0);
+  assert.equal(mock.log.filter(e => /application\/calculate/.test(e.url)).length, 1, 'recalculated once');
+});
+
+test('§8: deleting a month\'s only transaction hides every report row for that month', async () => {
+  const { mock, wb } = setup();
+  await wb.load();
+  await wb.addTransaction(entry({ date: '2026-09-06' }), { marker: makeMarker() });
+  assert.deepEqual(visibleReportRows(mock, 'September'), [4]);
+  const target = (await wb.load()).transactions.find(t => t.date === '2026-09-06');
+  const del = await wb.deleteTransaction(target);
+  assert.equal(del.reportFormatting, null);
+  assert.deepEqual(visibleReportRows(mock, 'September'), [], 'no transactions left: every report row hidden');
+  assert.equal(mock.hiddenRows('September').length, 30);
+});
+
+test('§8: a correction that moves a transaction to another month fixes both months', async () => {
+  const { mock, wb } = setup();
+  await wb.load();
+  await wb.addTransaction(entry({ date: '2026-09-06', description: 'Moves to October' }), { marker: makeMarker() });
+  assert.deepEqual(visibleReportRows(mock, 'September'), [4]);
+  assert.deepEqual(visibleReportRows(mock, 'October'), [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33], 'October untouched so far');
+  const ref = (await wb.load()).transactions.find(t => t.description === 'Moves to October');
+  const moved = await wb.updateTransaction(ref, { date: '2026-10-02' });
+  assert.equal(moved.date, '2026-10-02');
+  assert.equal(moved.reportFormatting, null);
+  assert.deepEqual(visibleReportRows(mock, 'September'), [], 'the month it left is now empty and fully hidden');
+  assert.deepEqual(visibleReportRows(mock, 'October'), [4], 'the month it moved to shows one row');
+  assert.deepEqual(contentWritesToFormulaSheets(mock), []);
+});
+
+test('§8: when the report formatting fails the transaction is still saved, and the result says exactly that', async () => {
+  const { mock, wb } = setup();
+  await wb.load();
+  let blocked = false;
+  mock.beforeRespond = async e => {
+    if (!blocked && e.method === 'PATCH' && /worksheets\/September/.test(e.url)) { blocked = true; throw new TypeError('Failed to fetch'); }
+  };
+  const res = await wb.addTransaction(entry({ date: '2026-09-06', description: 'Saved but unformatted' }), { marker: makeMarker() });
+  assert.equal(res.txn.id, 14, 'the transaction is saved');
+  assert.equal(nonBlank(mock.table('LOG_Table').rows).filter(r => r[6] === 'Saved but unformatted').length, 1, 'exactly once');
+  assert.ok(res.reportFormatting && res.reportFormatting.pending, 'the unfinished formatting is reported');
+  assert.equal(res.reportFormatting.message, REPORT_FORMATTING_SAVED);
+  assert.deepEqual(res.reportFormatting.months, [9]);
+  assert.ok(res.reportFormatting.detail, 'with a reason');
+  assert.equal(wb.halted, null, 'formatting is cosmetic: it does not pause saving');
+  // The retry finishes the formatting and cannot touch the transaction table.
+  mock.beforeRespond = null;
+  const from = mock.log.length;
+  const again = await wb.syncMonthVisibility(res.reportFormatting.months);
+  assert.equal(again.ok, true);
+  assert.deepEqual(visibleReportRows(mock, 'September'), [4]);
+  assert.deepEqual(mock.log.slice(from).filter(e => /LOG_Table|LOG_Sorted_Table/.test(e.url)), [], 'the retry never touches the transaction tables');
+  assert.equal(nonBlank(mock.table('LOG_Table').rows).filter(r => r[6] === 'Saved but unformatted').length, 1, 'and still exactly one transaction');
+});
+
+test('§8: syncMonthVisibility is idempotent, reads only the month it is given, and never unprotects anything', async () => {
+  const { mock, wb } = setup();
+  await wb.load();
+  await wb.addTransaction(entry({ date: '2026-09-06' }), { marker: makeMarker() });
+  const from = mock.log.length;
+  const a = await wb.syncMonthVisibility([9]);
+  const after = visibleReportRows(mock, 'September');
+  const b = await wb.syncMonthVisibility([9]);
+  assert.equal(a.ok && b.ok, true);
+  assert.deepEqual(visibleReportRows(mock, 'September'), after, 'running it twice changes nothing');
+  const touched = mock.log.slice(from);
+  assert.deepEqual(touched.filter(e => /LOG_Table|LOG_Sorted_Table/.test(e.url)), [], 'no transaction table request');
+  assert.deepEqual(touched.filter(e => /protection/.test(e.url)), [], 'no protect or unprotect request');
+  assert.deepEqual(touched.filter(e => /ENTRY/.test(e.url)), [], 'the password cell is never read');
+  assert.deepEqual(touched.filter(e => MONTHS_RE.test(e.url) && !/September/.test(e.url)), [], 'only the month it was given');
+  assert.deepEqual(await wb.syncMonthVisibility([]), { ok: true, months: [], runs: 0 });
 });

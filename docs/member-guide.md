@@ -37,6 +37,7 @@ Watch the line under the button:
 | **Not finished: your entry is in the workbook as #31, but…** | The row is there; its finishing steps (number formats, number check, the sorted helper table) are not confirmed. The button now says **Finish saving**; press it. The entry itself is not written again. |
 | **Someone else changed this record** | Another member (or someone in Excel) changed the same row since you opened it, so nothing was written. Press **Reload record** to read it again: if what you typed differs from the version now in the workbook, the site shows both and asks whether to **keep what you typed** (it will then be saved onto the row as it now stands) or to **use the workbook version**. Nothing you typed is replaced without that question. |
 | **Another change is still being saved…** (short message) | One change at a time: the previous save, delete or repair has not finished. Wait a moment and press again. You can keep typing meanwhile. |
+| **Transaction saved. Excel report formatting still needs updating.** (green band) | Your transaction is in the workbook and is safe. What did not finish is only which rows the monthly sheet shows in Excel, so the new row could sit hidden if someone opens or prints that sheet. Press **Finish report formatting**. It only adjusts rows; it can never add your transaction a second time. The band waits for you and comes back if you reload. |
 | **Changes are paused** (red band at the top) | A change could not be verified; see "If something needs checking" below. |
 
 You need an internet connection to save. If you lose signal, what you typed stays on the screen until you can save; it is not saved anywhere until the line says **Saved to workbook**. If you close the page or your phone reloads it, what you typed and any unconfirmed attempt come back; the site checks the workbook (reading only) and tells you what it found before you save again.
@@ -61,6 +62,13 @@ If, despite the one-writer rule, two changes hit the same part of the table at t
 - **Check whether this is resolved** re-reads the workbook and shows each check as OK, Not yet, or Cannot tell. When all are OK the band turns green ("Resolved, verified") and saving resumes. If something cannot be told from the table (the removed row could not be identified), a second button lets you mark it resolved after you compared the workbook with version history; the site refuses that shortcut while any check still fails.
 
 Tell the treasurer whenever this band appears.
+
+## Why the monthly sheets look right in Excel
+
+Each monthly sheet has room for thirty transactions and hides the rows it is not using. When you save, correct
+or delete something, the site updates which rows that month shows, so the sheet is right when the treasurer
+opens or prints it in Excel. You do not need to press any button in the workbook afterwards. If that last step
+does not finish, the green band above tells you and offers to finish it.
 
 ## Months and Annual
 

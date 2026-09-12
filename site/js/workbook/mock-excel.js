@@ -28,6 +28,7 @@ export class MockWorkbook {
     this.failures = [];
     this.log = [];
     this.beforeRespond = null;
+    this.hidden = new Map();     // sheet name -> Set of hidden row numbers
     this.onChange = null;        // called after every mutation (test-mode persistence)
     this.lastModified = '2026-09-06T01:23:54Z';
     this.eTag = 1;
@@ -75,6 +76,9 @@ export class MockWorkbook {
     };
   }
   setCell(sheetName, address, value) { const a = parseAddress(address); this._set(this._sheet(sheetName), a.r1, a.c1, value); this._touch(); }
+  /** Hidden row numbers on a sheet, ascending. */
+  hiddenRows(sheetName) { return [...(this.hidden.get(sheetName) || new Set())].sort((a, b) => a - b); }
+  setHiddenRows(sheetName, rows) { this.hidden.set(sheetName, new Set(rows)); this._touch(); }
   getCell(sheetName, address) { const a = parseAddress(address); return this._get(this._sheet(sheetName), a.r1, a.c1).v; }
   failNext(spec) { this.failures.push(spec); }
   expireSession() { this.sessions.clear(); }
@@ -89,11 +93,14 @@ export class MockWorkbook {
   exportState() {
     const sheets = {};
     for (const [name, s] of this.sheets) if (!s.computed) sheets[name] = [...s.cells.entries()];
-    return { sheets, tables: [...this.tables.values()].map(t => ({ name: t.name, bodyRows: t.bodyRows })), eTag: this.eTag, lastModified: this.lastModified };
+    const hidden = {};
+    for (const [name, set] of this.hidden) hidden[name] = [...set];
+    return { sheets, hidden, tables: [...this.tables.values()].map(t => ({ name: t.name, bodyRows: t.bodyRows })), eTag: this.eTag, lastModified: this.lastModified };
   }
   importState(state) {
     if (!state || !state.sheets) return this;
     for (const [name, entries] of Object.entries(state.sheets)) { const s = this._sheet(name); s.cells = new Map(entries.map(([k, c]) => [k, { ...c }])); }
+    for (const [name, rows] of Object.entries(state.hidden || {})) this.hidden.set(name, new Set(rows));
     for (const t of state.tables || []) { const table = this.tables.get(t.name); if (table) table.bodyRows = t.bodyRows; }
     if (state.eTag) this.eTag = state.eTag;
     if (state.lastModified) this.lastModified = state.lastModified;
@@ -229,12 +236,28 @@ export class MockWorkbook {
       }
       values.push(vr); text.push(tr); numberFormat.push(fr); formulas.push(ff);
     }
-    return { address: rangeAddress(sheetName, a.r1, a.c1, a.r2, a.c2), addressLocal: rangeAddress(sheetName, a.r1, a.c1, a.r2, a.c2), values, text, numberFormat, formulas,
+    const hiddenSet = this.hidden.get(sheetName) || new Set();
+    let nHidden = 0;
+    for (let r = a.r1; r <= a.r2; r++) if (hiddenSet.has(r)) nHidden += 1;
+    const rows = a.r2 - a.r1 + 1;
+    const rowHidden = nHidden === rows ? true : nHidden === 0 ? false : null;
+    return { address: rangeAddress(sheetName, a.r1, a.c1, a.r2, a.c2), addressLocal: rangeAddress(sheetName, a.r1, a.c1, a.r2, a.c2), values, text, numberFormat, formulas, rowHidden,
       rowIndex: a.r1 - 1, columnIndex: a.c1, rowCount: a.r2 - a.r1 + 1, columnCount: a.c2 - a.c1 + 1 };
   }
   _patchRange(sheetName, a, body) {
     const sheet = this.sheets.get(sheetName);
     if (!sheet) return graphError(404, 'ItemNotFound', 'itemNotFound', `Worksheet ${sheetName} not found`);
+    // Row visibility is a "format rows" change. The month sheets' protection allows it (checked against the
+    // real workbook), so it is permitted here even on the protected, formula-driven sheets. Content is not.
+    if (body.rowHidden !== undefined) {
+      if (typeof body.rowHidden !== 'boolean') return graphError(400, 'BadRequest', 'invalidArgument', 'rowHidden must be a boolean');
+      const set = this.hidden.get(sheetName) || new Set();
+      for (let r = a.r1; r <= a.r2; r++) { if (body.rowHidden) set.add(r); else set.delete(r); }
+      this.hidden.set(sheetName, set);
+      this._touch();
+    }
+    const touchesContent = ['values', 'formulas', 'numberFormat', 'columnHidden'].some(k => body[k] !== undefined);
+    if (!touchesContent) return ok(this._rangeJson(sheetName, a));
     if (sheet.computed) return graphError(403, 'AccessDenied', 'accessDenied', 'The worksheet is protected; formula cells cannot be changed.');
     if (body.formulas) return graphError(400, 'BadRequest', 'invalidArgument', 'Formula writes are not permitted in this mock.');
     const rows = a.r2 - a.r1 + 1, cols = a.c2 - a.c1 + 1;

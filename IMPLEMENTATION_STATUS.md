@@ -9,6 +9,103 @@ or in the repository; nothing has connected to Microsoft 365; no production work
 
 ---
 
+## 2026-09-12 — Monthly report rows are now updated by the app. **For review; not published, no live write run**
+
+A transaction saved from the website used to land in a month-sheet row that an earlier Office Script run had
+hidden: right on the website, missing when the sheet was opened or printed in Excel. The website now finishes
+each save by setting which rows that month shows. Full detail in `docs/workbook-mapping.md` §8.
+
+### Feasibility was checked first, against current Microsoft documentation
+| Need | Graph v1.0 | Source |
+|---|---|---|
+| Change row visibility | **Supported.** `PATCH …/range(address=…)` accepts `rowHidden` (Boolean); delegated `Files.ReadWrite` | [Update range](https://learn.microsoft.com/en-us/graph/api/range-update) |
+| Read it back to verify | **Supported.** `rowHidden` reads true when all rows in the range are hidden, false when none is, null for a mix | same |
+| Recalculate | **Supported.** `POST …/workbook/application/calculate` | already in the client |
+| Unprotect **with a password** | **Not supported.** The action takes no request body at all | [unprotect](https://learn.microsoft.com/en-us/graph/api/worksheetprotection-unprotect) |
+| Re-protect **with a password** | **Not supported.** `protect` takes `options` only | [protect](https://learn.microsoft.com/en-us/graph/api/worksheetprotection-protect) |
+
+Office Scripts and Graph are different surfaces, and this is where they differ: `unprotect(password)` and
+`protect(options, password)` exist in Office Scripts and have no Graph equivalent. A straight port of
+`refreshMonthlyVisibility()` was therefore impossible.
+
+**It turned out not to be needed.** A read-only inspection of the local workbook shows the twelve month sheets
+are protected **without a password** and with **"Format rows" allowed**, which is exactly the permission
+required to hide and show a row. ENTRY is the sheet with a password, and this app does not touch its
+protection. So the chosen approach never unprotects anything and never needs a password at all.
+
+### What it does
+After the transaction and the sorted helper table are verified: recalculate once; read `A4:A33` of each
+affected month; group the rows into runs sharing a visibility and PATCH `rowHidden` per run (normally two
+requests for a month); read each run back and check it. Affected months are the month of an added or deleted
+transaction, and **both** months when a correction moves one. It runs inside the existing operation queue and
+single-writer tab guard, and never on page load.
+
+It changes row visibility and nothing else: no protection call, no read or write of the cell holding the
+password, no request to `LOG_Table` or `LOG_Sorted_Table`. That is what makes the retry below incapable of
+duplicating a transaction, and it is asserted by tests rather than only claimed.
+
+### When it does not finish
+The transaction stays saved and is never rewritten. The screen shows **"Transaction saved. Excel report
+formatting still needs updating."** (a delete says "Transaction deleted."), the outstanding months are kept in
+this browser so a reload does not forget them, and a **Finish report formatting** button runs only the
+visibility pass for those months. Saving is **not** paused, because unfinished formatting is cosmetic rather
+than damage to a record; that is deliberately different from an incident. "Check workbook" and the check after
+a reload remain read-only and are unrelated to this.
+
+**Protection recovery, stated honestly.** If the month sheets are ever re-protected with "Format rows"
+disallowed, the PATCH fails and the member sees the message above, and **the app cannot repair it**: Graph
+cannot supply a password to unprotect, and silently changing a protection option is not something this app
+should do. Recovery is manual in Excel: allow "Format rows" again, or press one of the workbook's own buttons
+once, which runs `refreshMonthlyVisibility()` with the workbook's own password.
+
+### The alternative that was assessed
+Leaving all thirty rows visible needs no permission and no writes, and was rejected: every month sheet would
+print thirty mostly blank rows, changing the treasurer's paper report. Hiding blank rows is the workbook's
+existing design.
+
+### Files changed
+| File | Change |
+|---|---|
+| `site/js/workbook/ledger-workbook.js` | `_syncMonthVisibility`, `syncMonthVisibility` (queued), `visibilityRuns`, `monthOfIso`; wired into the add, delete and both correction paths; self-test now lists report row visibility as not compared |
+| `site/js/save/report-formatting.js` | new: the outstanding-months record, holding month numbers and a timestamp, no workbook content and no password |
+| `site/js/ledger/app.js` | the green band, its persistence, and the explicit Finish button |
+| `site/ledger.html`, `site/css/app.css` | the band |
+| `site/js/workbook/mock-excel.js` | row visibility, modelled on the protection actually read from the workbook: `rowHidden` PATCH allowed on the protected month sheets, content writes still refused |
+| `tests/unit/ledger-workbook.test.js` | six new tests; the "no formula-sheet writes" assertions now distinguish content writes from the permitted visibility writes |
+| `tests/e2e/report-visibility.spec.js` | new, five tests |
+| `docs/workbook-mapping.md` §8, `docs/member-guide.md`, `docs/checkpoint-2-runbook.md` Part 2b | the approach, what a member sees, and the live procedure |
+
+### Tests (2026-09-12, this folder)
+- `npm test`: **137 passed, 0 failed** (was 131). New: run grouping and `monthOfIso`; an add showing and hiding
+  the right rows of its month and no other; a delete of a month's only transaction hiding all thirty; a
+  correction across months fixing both; a failed format leaving the transaction saved with the exact message
+  and a retry that finishes it; and idempotence plus the absence of any transaction-table, protection or ENTRY
+  request during a sync.
+- `npx playwright test`: **177 passed, 0 failed** (was 162) = 59 per project × 3. The partial-failure test
+  asserts the message, that it survives a reload, that **zero writes happen when the page opens**, and that the
+  retry leaves exactly one transaction.
+- `npm run verify:config`: 21 passed.
+
+**Mock tests are not evidence that Graph supports this.** The documentation above is the API evidence; the mock
+was taught to allow a `rowHidden` PATCH on a protected sheet because the real workbook's protection allows it,
+and that modelling is itself an assumption until the live test runs.
+
+### Live test procedure
+`docs/checkpoint-2-runbook.md` **Part 2b**: note the hidden rows on a month sheet in Excel, close it, add one
+labelled transaction on the website, confirm no green band, reopen in Excel and confirm the row is visible and
+prints, delete it on the website, and confirm the sheet returns to its earlier state. The Diagnostics
+connection test already exercises the same write on December, so it is the first live proof if it passes.
+
+### Not done, and outstanding
+- **Not published and no live write run**, as instructed. The change is committed locally for review only.
+- **`RefreshReports` was never supplied.** The reference used is `refreshMonthlyVisibility()`, which is the
+  routine that actually does this work and appears in full in both `SubmitEntry` and `DeleteTransaction`. If
+  `RefreshReports` does anything beyond it, this may need revisiting.
+- Months left stale by saves made **before** this change are not repaired automatically; a save touching that
+  month fixes it, or the workbook's own button does.
+
+---
+
 ## 2026-09-11 (live, read-only) — First connection to Microsoft 365 succeeded. **Partial Checkpoint 2 evidence, not approval**
 
 Reported by Cody after running the Diagnostics page against the pilot copy `TPAHA_2026 (1).xlsx`. The account

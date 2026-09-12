@@ -26,6 +26,9 @@ export const DATE_FORMAT = 'yyyy-mm-dd';
 export const MONEY_FORMAT = '$#,##0.00';
 const FORMAT_ROW = [null, null, DATE_FORMAT, null, null, MONEY_FORMAT, null, null, null];
 const SELF_TEST_DESCRIPTION = 'TPAHA Books connection test';
+const MONTH_FIRST_ROW = 4, MONTH_LAST_ROW = 33;   // the transaction rows on every monthly report sheet
+export const REPORT_FORMATTING_SAVED = 'Transaction saved. Excel report formatting still needs updating.';
+export const REPORT_FORMATTING_DELETED = 'Transaction deleted. Excel report formatting still needs updating.';
 const SORTED_WARNING = 'The monthly sheets may be out of date: the sorted helper table could not be confirmed. Press Refresh to retry.';
 const FORMAT_WARNING = 'The number formats on the new row could not be confirmed (its date may display as a number until Excel is opened). The values are saved.';
 
@@ -160,6 +163,24 @@ export function sortedTableMatches(logValues, sortedValues) {
 }
 const sortedTarget = log => expectedSortedRows(log.rows.map(r => r.values));
 const rowFormatsOk = nf => Array.isArray(nf) && nf[2] === DATE_FORMAT && nf[5] === MONEY_FORMAT;
+/** 1-12 from an ISO date, 0 when it cannot be read. */
+const monthOfIso_or_number = v => (typeof v === 'number' ? (Number.isInteger(v) ? v : 0) : monthOfIso(v));
+export const monthOfIso = iso => { const m = Number(String(iso || '').slice(5, 7)); return Number.isInteger(m) && m >= 1 && m <= 12 ? m : 0; };
+/**
+ * Consecutive report rows that should share a visibility, so the whole sheet is set with a couple of requests
+ * instead of thirty. `populated[i]` is true when report row MONTH_FIRST_ROW + i has a date in it.
+ */
+export function visibilityRuns(populated) {
+  const runs = [];
+  populated.forEach((isPopulated, i) => {
+    const row = MONTH_FIRST_ROW + i, hidden = !isPopulated, last = runs[runs.length - 1];
+    if (last && last.hidden === hidden) last.last = row;
+    else runs.push({ first: row, last: row, hidden });
+  });
+  return runs;
+}
+/** The record a screen shows when the transaction landed but its report formatting did not finish. */
+const pendingReportFormatting = (vis, message) => (vis.ok ? null : { pending: true, months: vis.months, message, detail: vis.error });
 
 // ---- adapter -----------------------------------------------------------------------------------
 export class LedgerWorkbook {
@@ -362,7 +383,8 @@ export class LedgerWorkbook {
     const u = await this._ensureUniqueNumber(log, txn);
     const sorted = await this._rebuildSorted();
     if (!sorted.consistent) warnings.push(SORTED_WARNING);
-    return { txn: u.txn, alreadyExisted, renumberedFrom: u.renumberedFrom, warnings };
+    const vis = await this._syncMonthVisibility([monthOfIso(u.txn.date)]);
+    return { txn: u.txn, alreadyExisted, renumberedFrom: u.renumberedFrom, warnings, reportFormatting: pendingReportFormatting(vis, REPORT_FORMATTING_SAVED), formattedMonths: vis.months };
   }
 
   /** Submit Entry. `marker` is the operation id (makeMarker()); it makes checks and retries safe. */
@@ -488,7 +510,8 @@ export class LedgerWorkbook {
     if (!outcome.deleted) throw new VerificationError('delete-unconfirmed', `The delete of #${cur.id} did not reach the workbook; nothing was changed. Try again.`);
     const sorted = await this._rebuildSorted();
     if (!sorted.consistent) outcome.notices.push(SORTED_WARNING);
-    return { deleted: true, notices: outcome.notices };
+    const vis = await this._syncMonthVisibility([monthOfIso(cur.date)]);
+    return { deleted: true, notices: outcome.notices, reportFormatting: pendingReportFormatting(vis, REPORT_FORMATTING_DELETED), formattedMonths: vis.months };
   }
 
   /** Correct a transaction: append the corrected copy (same id and timestamp), then delete the old copy with the checked delete. */
@@ -556,7 +579,8 @@ export class LedgerWorkbook {
     if (olds.length === 0) {
       const sorted = await this._rebuildSorted();
       if (!sorted.consistent) warnings.push(SORTED_WARNING);
-      return { ...fresh[0], warnings, notices: resumed ? [] : ['This record was deleted by someone else while you corrected it; your corrected copy is now the only one.'] };
+      const vis = await this._syncMonthVisibility([monthOfIso(cur.date), monthOfIso(fresh[0].date)]);
+      return { ...fresh[0], warnings, notices: resumed ? [] : ['This record was deleted by someone else while you corrected it; your corrected copy is now the only one.'], reportFormatting: pendingReportFormatting(vis, REPORT_FORMATTING_SAVED), formattedMonths: vis.months };
     }
     const old = olds[0];
     const duplicate = (why, post) => this._halt(new UnresolvedOperationError('duplicate-copy', `Your correction to #${cur.id} is saved, but the old copy could not be removed (${why}). Two copies exist. Nothing more will be written until this is checked; the old copy can be removed explicitly from the details shown.`, { ...detail, copies: (post || log2).txns.filter(t => identityOf(t) === ident).map(publicTxn) }));
@@ -570,14 +594,63 @@ export class LedgerWorkbook {
       const sorted = await this._rebuildSorted();
       if (!sorted.consistent) warnings.push(SORTED_WARNING);
       const result = post.txns.find(t => identityOf(t) === ident && t.fingerprint === newFp) || fresh[0];
-      return { ...result, warnings, notices: outcome.notices };
+      const vis = await this._syncMonthVisibility([monthOfIso(cur.date), monthOfIso(result.date)]);
+      return { ...result, warnings, notices: outcome.notices, reportFormatting: pendingReportFormatting(vis, REPORT_FORMATTING_SAVED), formattedMonths: vis.months };
     }
     // 'gone': someone removed the old copy between our read and the checked delete
     if (post.txns.filter(t => identityOf(t) === ident).length !== 1) throw duplicate('the copies could not be reconciled', post);
     const sorted = await this._rebuildSorted();
     if (!sorted.consistent) warnings.push(SORTED_WARNING);
     const result = post.txns.find(t => identityOf(t) === ident && t.fingerprint === newFp) || fresh[0];
-    return { ...result, warnings, notices: ['The old copy of this record was removed by someone else at the same time.'] };
+    const vis = await this._syncMonthVisibility([monthOfIso(cur.date), monthOfIso(result.date)]);
+    return { ...result, warnings, notices: ['The old copy of this record was removed by someone else at the same time.'], reportFormatting: pendingReportFormatting(vis, REPORT_FORMATTING_SAVED), formattedMonths: vis.months };
+  }
+
+  // ---- monthly report row visibility -----------------------------------------------------------
+  /**
+   * Makes each monthly report sheet show exactly its populated rows, by the same rule the workbook's own
+   * `refreshMonthlyVisibility()` uses: a row between 4 and 33 is shown when its date cell holds a value and
+   * hidden when that cell is blank. Without this, a transaction added from the website lands in a row an
+   * earlier script run had hidden, so the month sheet looks right on the website but misses the row when it is
+   * opened or printed in Excel.
+   *
+   * It changes row visibility and nothing else. It never unprotects a sheet, never reads or sets a protection
+   * password, and never writes a cell value: the month sheets are protected with "format rows" allowed, so a
+   * plain `PATCH …/range(address='A4:A9') { rowHidden }` is permitted while content writes stay blocked
+   * (docs/workbook-mapping.md §8). It never touches LOG_Table either, so however many times it runs it cannot
+   * add, change or remove a transaction.
+   *
+   * Returns { ok, months, runs, error } and never throws into a save: a transaction that reached the workbook
+   * stays saved even when its report formatting could not be finished.
+   */
+  async _syncMonthVisibility(months, { recalculate = true } = {}) {
+    const wanted = [...new Set((months || []).map(monthOfIso_or_number).filter(m => m >= 1 && m <= 12))].sort((a, b) => a - b);
+    if (!wanted.length) return { ok: true, months: [], runs: 0 };
+    const expected = MONTH_LAST_ROW - MONTH_FIRST_ROW + 1;
+    let runs = 0;
+    try {
+      // The report rows are formulas over LOG_Sorted; recalculate once so what is read reflects the change.
+      if (recalculate) await this.client.calculate('Full');
+      for (const m of wanted) {
+        const name = MONTH_NAMES[m - 1];
+        const col = await this.client.getRange(name, `A${MONTH_FIRST_ROW}:A${MONTH_LAST_ROW}`, 'address,values');
+        const populated = (col.values || []).map(r => !(r[0] === '' || r[0] === null || r[0] === undefined));
+        if (populated.length !== expected) return { ok: false, months: wanted, error: `The ${name} sheet returned ${populated.length} report rows instead of ${expected}.` };
+        for (const run of visibilityRuns(populated)) {
+          const address = `A${run.first}:A${run.last}`;
+          await this.client.patchRange(name, address, { rowHidden: run.hidden });
+          runs += 1;
+          const back = await this.client.getRange(name, address, 'address,rowHidden');   // verify what was set
+          if (back.rowHidden !== run.hidden) {
+            const got = back.rowHidden === null || back.rowHidden === undefined ? 'a mix of both' : back.rowHidden ? 'hidden' : 'shown';
+            return { ok: false, months: wanted, error: `${name} rows ${run.first} to ${run.last} should be ${run.hidden ? 'hidden' : 'shown'}; the workbook reports ${got}.` };
+          }
+        }
+      }
+    } catch (e) {
+      return { ok: false, months: wanted, error: e.message };
+    }
+    return { ok: true, months: wanted, runs };
   }
 
   // ---- explicit repairs (member-confirmed, allowed while paused) ----------------------------
@@ -726,6 +799,7 @@ export class LedgerWorkbook {
   removeCopy(identity, fingerprint, opts) { return this._exclusive(() => this._removeCopy(identity, fingerprint, opts)); }
   reappendRow(values, opts) { return this._exclusive(() => this._reappendRow(values, opts)); }
   rebuildSorted() { return this._exclusive(() => this._rebuildSorted()); }
+  syncMonthVisibility(months, opts) { return this._exclusive(() => this._syncMonthVisibility(months, opts)); }
   setPriorYearBalance(value, expectedCurrent) { return this._exclusive(() => this._setPriorYearBalance(value, expectedCurrent)); }
 
   // ---- self-test (test copy only) -------------------------------------------------------------
@@ -744,7 +818,8 @@ export class LedgerWorkbook {
     };
     const year = this.year || Number((await this.client.getRange('ConfigHidden', 'A1')).values[0][0]);
     const compared = ['LOG values and number formats', 'LOG_Sorted values and number formats', 'ENTRY!B23', 'January formulas (A4:O40)', `Annual ${year} formulas (A3:N19)`, 'table row counts'];
-    const notCompared = ['other worksheets', 'formatting outside the compared ranges', 'table styles, names, protection and validation', 'workbook-level features'];
+    const notCompared = ['other worksheets', 'formatting outside the compared ranges', 'table styles, names, protection and validation', 'workbook-level features',
+      'row visibility on the monthly report sheets: the test row is added to December and removed again, and this app leaves December\'s report rows matching its contents'];
     const state = async () => {
       const log = await this.client.getTableBody(this.table);
       const sorted = await this.client.getTableBody(this.sortedTable);

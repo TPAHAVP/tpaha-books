@@ -22,6 +22,7 @@ import { findCandidates, rememberWorkbook, recallWorkbook, forgetWorkbook, resol
 import { SaveController } from '../save/save-controller.js';
 import { draftKey, DraftStore, DraftStorageError, installUnloadGuard, clearDraftsForAccount, combineDrafts } from '../save/drafts.js';
 import { incidentKey, IncidentStore } from '../save/incidents.js';
+import { reportFormattingKey, ReportFormattingStore } from '../save/report-formatting.js';
 import { createTabGuard } from '../save/tab-guard.js';
 import { h, toast, confirmDialog, setupTabs, fmtMoney, fmtDate, todayIso, signInGate } from '../ui.js';
 import { MONTH_NAMES, CATEGORIES, DEPOSIT_CATEGORIES, WITHDRAWAL_CATEGORIES, validateEntry, monthView, annualView, toCents } from './model.js';
@@ -39,6 +40,7 @@ const state = {
   entryCtl: null, editCtl: null, editingRef: null, drafts: null, draftWarned: false,
   settingsDirty: false, settingsSaving: false,
   incidents: null, repaired: new Set(), lastChecks: null,
+  reportFmt: null, reportFmtRec: null,
   tabGuard: null, secondaryTab: false,
 };
 
@@ -70,6 +72,8 @@ async function main() {
   state.incidents = new IncidentStore(localStorage, incidentKey(ids));
   const recorded = state.incidents.read();
   if (recorded) state.wb.restoreIncident(recorded);                    // a reload does not forget an unresolved change
+  state.reportFmt = new ReportFormattingStore(localStorage, reportFormattingKey(ids));
+  state.reportFmtRec = state.reportFmt.read();                         // shown on the next render; never run on its own
   state.tabGuard = createTabGuard();
   const tab = await state.tabGuard.start();
   state.secondaryTab = !tab.primary;
@@ -167,6 +171,7 @@ async function reload(message) {
     for (const n of snap.notices || []) toast(n, 'info');
     if (state.wb.halted) { persistIncident(); await checkResolution({ quiet: true }); }
     renderIncident();
+    renderReportBanner();
     fillCategories(field($('#entry-form'), 'category'), field($('#entry-form'), 'type').value);
     renderList();
     renderTab();
@@ -357,6 +362,7 @@ async function afterEntrySave(r) {
   if (r.ok) {
     const res = r.result || {};
     const txn = res.txn || res;
+    noteReportFormatting(res);
     if (c.state === 'saved') {
       for (const name of ['category', 'amount', 'description', 'chequeNum', 'notes']) field(form, name).value = '';
       fillCategories(field(form, 'category'), field(form, 'type').value);
@@ -431,6 +437,7 @@ async function deleteTxn(t) {
   if (!writeAllowed()) return;                           // something may have started while the dialog was open
   try {
     const r = await withBusy(() => state.wb.deleteTransaction(t));
+    noteReportFormatting(r);
     toast(`Deleted #${t.id}`);
     for (const n of r.notices || []) toast(n, 'info');
     await reload();
@@ -564,6 +571,45 @@ async function repairRemoveCopy(copy, key, { allowIdentical = false } = {}) {
   } catch (e) { if (e instanceof UnresolvedOperationError) showIncident(); else toast(e.message, 'error'); }
 }
 
+// ---- unfinished monthly report formatting ----------------------------------------------------
+/**
+ * Records what a finished operation managed to format and what it did not, then shows it. This never runs
+ * anything: a member presses the button. The transaction itself is already in the workbook, and the retry
+ * cannot write to the transaction table at all, so it can never add one twice.
+ */
+function noteReportFormatting(result) {
+  if (!result || !state.reportFmt) return;
+  const unfinished = result.reportFormatting;
+  if (unfinished && unfinished.pending) state.reportFmtRec = state.reportFmt.add(unfinished.months, unfinished.message);
+  else if (result.formattedMonths) state.reportFmtRec = state.reportFmt.remove(result.formattedMonths);
+  renderReportBanner();
+}
+function renderReportBanner() {
+  const b = $('#report-banner');
+  if (!b) return;
+  const rec = state.reportFmtRec;
+  if (!rec) { b.hidden = true; b.replaceChildren(); return; }
+  const names = rec.months.map(m => MONTH_NAMES[m - 1]).join(', ');
+  const sheets = rec.months.length === 1 ? 'the monthly report sheet' : 'the monthly report sheets';
+  b.replaceChildren(
+    h('strong', {}, rec.message || 'Excel report formatting still needs updating.'),
+    h('p', { className: 'small' }, `What is left is only which rows are shown on ${sheets} for ${names}. Until it is done, a transaction can sit in a hidden row when that sheet is opened or printed in Excel, even though this website shows it. Your transaction is in the workbook and is never written again by this.`),
+    h('div', { className: 'row' }, h('button', { type: 'button', className: 'btn btn-primary btn-finish-report', onClick: finishReportFormatting }, 'Finish report formatting')));
+  b.hidden = false;
+}
+async function finishReportFormatting() {
+  if (!state.reportFmtRec || !writeAllowed()) return;
+  const months = state.reportFmtRec.months;
+  try {
+    const r = await withBusy(() => state.wb.syncMonthVisibility(months));
+    if (r.ok) { state.reportFmtRec = state.reportFmt.remove(months); toast('Excel report formatting finished.'); }
+    else toast(`Still not finished: ${r.error}`, 'error');
+  } catch (e) {
+    toast(`Still not finished: ${e.message}`, 'error');
+  }
+  renderReportBanner();
+}
+
 // ---- correct (edit) ------------------------------------------------------------------------
 function buildEditDialog() {
   const dlg = $('#edit-dialog'), form = $('#edit-form'), stateEl = $('#edit-state'), actions = $('#edit-actions');
@@ -687,6 +733,7 @@ async function afterEditSave(r) {
   const c = state.editCtl;
   if (r.ok) {
     const saved = r.result;
+    noteReportFormatting(saved);
     if (saved && saved.id !== undefined) {
       state.editingRef = saved;      // later saves must target the corrected copy…
       persistDraft();                // …and the stored record must carry that reference with any newer draft (U1)
