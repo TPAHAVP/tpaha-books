@@ -32,15 +32,19 @@ identify the app and the organisation, while who may sign in and what they may o
 ### A problem this raised, and how it was solved
 Test mode was triggered by an empty `clientId`. Filling the id in would have taken the whole browser suite
 offline with the real registration and made local development impossible without editing the file back and
-forth. `site/js/config.js` now supplies the ids **only to the published host** and blanks them for
-`localhost` and `127.0.0.1`. The rule is the address the page was served from, not a flag or a query
-parameter, so nothing a member can click, type or paste can put the published site into test mode, and the
-tests keep running offline against the sample workbook.
+forth. `site/js/config.js` now **blanks the ids for local hostnames** (`localhost`, `127.0.0.1`, `::1`, and
+a `file://` page) and supplies them for **every other hostname**. It is a denylist of local addresses, not an
+allowlist of the published one: a copy served from a LAN address or a fork published elsewhere would also carry
+the client id. That is deliberate, and the id is not what protects anything. The registration accepts exactly
+one SPA redirect URI, so Microsoft rejects a sign-in begun anywhere else before issuing a token, and assignment
+is required. The rule depends on the address the page was served from rather than a flag or query parameter, so
+nothing a member can click, type or paste changes it, and the tests keep running offline against the sample.
 
 ### Verification, none of it touching Microsoft
 `tools/verify-config.mjs` (new, `npm run verify:config`): **17 checks, all passing**. It checks that both ids
 are well-formed GUIDs matching the registration and differ from each other; that a page served from
-`localhost` or `127.0.0.1` gets no ids while the published host and a future custom domain get them; that the
+`localhost` or `127.0.0.1` gets no ids while other hostnames, including the published site, a future custom
+domain and a LAN address, get them; that the
 redirect URI the app derives from each of the four pages equals the registered SPA redirect exactly; that the
 scopes requested are exactly the two consented; that the authority is the single tenant rather than
 `/common`; that sign-in is redirect-based so no implicit grant is needed; that no client secret, certificate

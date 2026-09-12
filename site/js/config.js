@@ -5,10 +5,20 @@
 // no client secret in this site and there must never be one: this code runs in the member's browser, where
 // nothing can be kept secret.
 //
-// TEST MODE. A page served from this machine runs against an in-memory sample workbook with made-up figures and
-// never reaches Microsoft 365. That is how the automated tests and local development run. The published site
-// always uses the ids below. The rule is the address the page was served from, not a flag or a query
-// parameter, so nothing a member can click, type or paste can put the real site into test mode.
+// TEST MODE, and exactly what decides it. The rule is a denylist of local hostnames, not an allowlist of one
+// published address: a page served from localhost, 127.0.0.1, ::1 or from a file:// URL gets blank ids and runs
+// against an in-memory sample workbook with made-up figures, never reaching Microsoft 365. That is how the
+// automated tests and local development stay offline. **Every other hostname gets the ids below**, including a
+// copy served from another machine's IP address or a fork published at a different address.
+//
+// That is deliberate and is not what keeps the app safe. Two other things do. The Entra registration accepts
+// exactly one SPA redirect URI, so a sign-in started anywhere but https://tpahavp.github.io/tpaha-books/ is
+// rejected by Microsoft before any token is issued. And "Assignment required" limits sign-in to the assigned
+// accounts, who could already open the workbook themselves. A client id is an identifier, not a credential.
+//
+// The practical consequence for a member: nothing they can click, type or paste changes the mode, because it
+// is not a flag or a query parameter. The practical consequence for a developer: serve the site from
+// localhost, never from a LAN address, or the page will try to sign in for real.
 const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]', '::1', '']);
 const servedLocally = typeof location === 'undefined' || LOCAL_HOSTS.has(location.hostname);
 

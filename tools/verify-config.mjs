@@ -35,14 +35,18 @@ check('Client id is a well-formed GUID and matches the registration', GUID.test(
 check('Tenant id is a well-formed GUID and matches the directory', GUID.test(live.tenantId) && live.tenantId === EXPECTED.tenantId, live.tenantId);
 check('The two ids are different values', live.clientId !== live.tenantId);
 
-// The published site is configured; anything served from this machine is not, so tests and local work stay offline.
-for (const host of ['localhost', '127.0.0.1']) {
+// The host rule is a DENYLIST of local addresses, not an allowlist of the published one. Local hostnames get
+// blank ids so the tests and local development stay offline; every other hostname gets the ids, including a LAN
+// address or a fork published elsewhere. What confines a real sign-in to the published site is the single SPA
+// redirect URI in the registration, checked by Microsoft before any token is issued, plus assignment being
+// required. These checks assert that shape rather than a prettier one.
+for (const host of ['localhost', '127.0.0.1', '::1', '']) {
   const c = await asServedFrom(host);
-  check(`Served from ${host}: test mode, no Microsoft sign-in`, c.clientId === '' && c.tenantId === '', `clientId="${c.clientId}"`);
+  check(`Served from "${host}": test mode, no Microsoft sign-in`, c.clientId === '' && c.tenantId === '', `clientId="${c.clientId}"`);
 }
-for (const host of [new URL(EXPECTED.site).hostname, 'books.tpaha.ca']) {
+for (const host of [new URL(EXPECTED.site).hostname, 'books.tpaha.ca', '192.168.1.50', 'someone-else.github.io']) {
   const c = await asServedFrom(host);
-  check(`Served from ${host}: configured for Microsoft sign-in`, c.clientId === EXPECTED.clientId);
+  check(`Served from "${host}": carries the ids (every non-local hostname does)`, c.clientId === EXPECTED.clientId);
 }
 
 // The redirect URI the app actually sends is derived in js/auth.js as new URL('./', location.href).

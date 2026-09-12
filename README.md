@@ -70,12 +70,15 @@ npm run serve                # http://localhost:8787/  (test mode: in-memory sam
 python tools/build_seed.py   # only with the real .xlsx files present: writes data/ (git-ignored) fixtures used by the formula oracle tests
 ```
 
-Test mode is what you get when a page is served from this machine. `site/js/config.js` supplies the app
-registration only to the published host and blanks it for `localhost` and `127.0.0.1`, so local pages run
-against a synthetic sample workbook (`site/js/workbook/sample-workbook.js`) served by `js/workbook/mock-excel.js`,
-which answers the same Graph URLs the real client uses and mirrors the workbook's formulas. The rule is the
-address the page came from, not a flag or a query parameter, so nothing a member can click, type or paste puts
-the published site into test mode. `npm run verify:config` checks that rule and the rest of the sign-in
+Test mode is what you get when a page is served from this machine. `site/js/config.js` blanks the app
+registration for local hostnames (`localhost`, `127.0.0.1`, `::1`, and `file://`) and supplies it for every
+other hostname, so local pages run against a synthetic sample workbook (`site/js/workbook/sample-workbook.js`) served by `js/workbook/mock-excel.js`,
+which answers the same Graph URLs the real client uses and mirrors the workbook's formulas. The rule is the address the page came from, not a flag or a query
+parameter, so nothing a member can click, type or paste puts the published site into test mode. Note the shape
+of it: local hostnames are excluded, every other hostname is configured, so a copy served from a LAN address or
+a fork at another address would also carry the client id. What confines sign-in to the real site is the single
+SPA redirect URI in the registration, which Microsoft checks before issuing anything, together with assignment
+being required. `npm run verify:config` checks that rule and the rest of the sign-in
 configuration without contacting Microsoft. The
 formula oracle tests compare against values cached by Excel and skip automatically when the git-ignored
 fixtures are absent. **Those four test files are themselves git-ignored** (`tests/unit/ledger-model.test.js`,

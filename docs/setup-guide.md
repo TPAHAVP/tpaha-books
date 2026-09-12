@@ -57,11 +57,22 @@ from part B. Both are identifiers, not secrets, which is why they sit in a file 
 sign in and what they may open is still decided by Microsoft 365. There is no client secret and there must
 never be one.
 
-One thing to understand before changing that file. The configuration hands those ids only to the **published
-host**; a page served from a developer's own machine (`localhost`, `127.0.0.1`) gets blank ids and therefore
-runs in test mode against the in-memory sample workbook. That is how the automated tests and local development
-stay offline. The rule is the address the page was served from, not a flag or a query parameter, so nothing a
-member can click, type or paste can put the real site into test mode.
+One thing to understand before changing that file, stated precisely. The configuration blanks the ids for
+**local hostnames** (`localhost`, `127.0.0.1`, `::1`, and a page opened as a `file://` URL) and supplies
+them for **every other hostname**. It is a denylist of local addresses, not an allowlist of the published one.
+A page served from a developer's machine therefore runs in test mode against the in-memory sample workbook,
+which is how the automated tests stay offline, while a copy served from a LAN address or a fork published
+elsewhere would carry the client id.
+
+That is deliberate, and the client id is not what protects the workbook. Two other things do. The registration
+accepts exactly one SPA redirect URI, so a sign-in begun at any other address is rejected by Microsoft before a
+token is issued. And "Assignment required" limits sign-in to the accounts you assigned, who can already open
+the workbook themselves. A client id is an identifier, not a credential, which is why it may sit in a published
+file at all.
+
+For a member the rule is simply not reachable: it depends on the address the page was served from, not on a
+flag or a query parameter, so nothing they can click, type or paste changes it. For a developer it means
+serving the site from `localhost`, never from a LAN address.
 
 Run `npm run verify:config` after any change here. It checks the id formats, the host rule, the redirect URI
 the app actually derives, the scopes requested, and that no secret has crept into the site. It never contacts
