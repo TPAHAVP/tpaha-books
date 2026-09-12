@@ -10,6 +10,62 @@ to the developer.
 
 ---
 
+## Part 0. Publish the reviewed code — **prepared, not yet run**
+
+Codex approved `7740e6c` on 2026-09-12. The unpublished work is `9e464cd`, `d5a0faa`, `68db038`, `fdab0a1`,
+`7740e6c` — the monthly report rows and the four review fixes that followed — plus the commit that added this
+Part 0. Step 0.2 lists them; read what it prints rather than trusting this sentence.
+
+**Nothing in Part 0 touches the workbook.** It puts reviewed code on the website. The workbook test is Part 2
+and needs its own go-ahead. Run Part 0 only when Cody says to publish.
+
+**0.1 — Confirm the tree is clean and every suite passes.** In the project folder:
+
+| Command | Expect |
+|---|---|
+| `git status --short` | no output at all |
+| `npm test` | `pass 152`, `fail 0` |
+| `npx playwright test` | `189 passed` |
+| `npm run verify:config` | `21 passed, 0 failed` |
+
+Stop if any number is lower or anything is uncommitted. A failing suite is not published.
+
+**0.2 — Look at exactly what will go out.**
+
+- `git log --oneline origin/main..HEAD` — expect the commits above and nothing you do not recognise.
+- `git diff --stat origin/main..HEAD` — site code, tests and documentation only: no workbook, no `data/`.
+- `git diff --name-only origin/main..HEAD | grep -iE "data/|\.xlsx|office-script"` — expect **no output**.
+
+Stop if that last command prints anything: something private is staged, and it must be removed before pushing.
+Public history cannot be un-published.
+
+**0.3 — Push.** `git push origin main`
+
+**0.4 — Watch the deployment finish.** GitHub → the repository → **Actions** → "Deploy TPAHA Books to GitHub
+Pages". Wait for the green tick. If it fails, the previously deployed site stays up: nothing is broken for
+anyone, so read the log rather than pushing again.
+
+**0.5 — Verify what is being served, not what was pushed.**
+
+1. Hard-refresh `https://tpahavp.github.io/tpaha-books/` (Ctrl+F5). The ledger page loads and there is **no**
+   "Test mode" banner — on a published address the site is in connected mode.
+2. Check the deployed configuration file is byte-for-byte the reviewed one. In PowerShell:
+   ```
+   Invoke-WebRequest https://tpahavp.github.io/tpaha-books/js/config.js -OutFile $env:TEMP\deployed-config.js
+   Get-FileHash $env:TEMP\deployed-config.js -Algorithm SHA256
+   ```
+   Expect `BC25AC6C2BE1D4983C4844B5BC61C714CE9354C82C50C11281A9060CB499CE48`. Stop if it differs.
+3. Delete the download: `Remove-Item $env:TEMP\deployed-config.js`
+
+**0.6 — Leave it signed out.** Do not sign in yet. Publishing is finished; the workbook test is a separate
+authorisation.
+
+**If it has to be undone:** Pages serves whatever is on `main`. Revert the commit you want gone
+(`git revert <sha>`) and push; the workflow redeploys the previous state. Never force-push — it rewrites public
+history rather than correcting it.
+
+---
+
 ## Part 1. Before the day: five prerequisites
 
 All five must be true before the write test is started. Any one missing means stop.
@@ -114,25 +170,62 @@ same write on December, so if that passed, this is the confirmation in Excel.
 3. Confirm no green band appears. If it does, note its wording, press **Finish report formatting**, and note
    what happens. A message naming "Format rows" means the online copy's protection disallows it; send that
    wording rather than changing any protection setting yourself.
-4. **If the rows are wrong in Excel afterwards** and the website cannot fix them, the repair is **Run
-   RefreshReports** in Excel — reviewed 2026-09-12, it adds and deletes no transactions. Close the website's
-   save first and press it once. Do not press Run SubmitEntry or Run DeleteTransaction: those change
-   transactions. Record that you had to do it, because needing it is itself a result worth reporting.
 4. Open the workbook in Excel again, go to that month sheet, and confirm the new transaction's row is **visible**
    and the blank rows below it are hidden. Use File, Print, Preview and confirm the row appears there too.
-5. Back on the website, delete that transaction. Confirm the website removes it.
-6. Reopen the workbook in Excel and confirm the row is hidden again and the sheet looks as it did in step 1.
+5. **Only if the rows are wrong in Excel** and the website cannot fix them: the repair is **Run RefreshReports**
+   in Excel — reviewed 2026-09-12, it adds and deletes no transactions. Close the workbook's save first and
+   press it once. Do not press Run SubmitEntry or Run DeleteTransaction: those change transactions. Record that
+   you needed it, because needing it is itself a result worth reporting.
+6. Back on the website, delete that transaction. Confirm the website removes it.
+7. Reopen the workbook in Excel and confirm the row is hidden again and the sheet looks as it did in step 1.
 
-What to send: which rows were hidden at step 1 and step 6, whether the green band appeared, and whether the
+What to send: which rows were hidden at step 1 and step 7, whether the green band appeared, and whether the
 printed preview showed the new row. Stop and report if the row stays hidden in Excel after step 4, or if the
 green band cannot be cleared.
 
-## Part 3. What to send back for Checkpoint 2
+## Part 3. Cleanup: put the test copy back as you found it
+
+Do this on the same day, before reporting. The connection test in Part 2 step 4 cleans up after itself; Part 2b
+adds a real transaction that you delete by hand. This part is how you prove both.
+
+**3.1 — On the website, with the workbook closed in Excel.**
+
+1. Press **Refresh**.
+2. The transaction count matches the number you started with. Write down both.
+3. No transaction described *TPAHA Books connection test* is listed. Search for it.
+4. The transaction you added in Part 2b is gone.
+5. No green "report formatting" band. If one is showing, press **Finish report formatting** once and wait for
+   it to clear. If it will not clear, stop and report it — do not keep pressing.
+6. No red paused band and no unresolved incident. If either is showing, stop and report it. Do not clear it
+   yourself: a paused band means the app believes the workbook needs a person to look.
+
+**3.2 — In Excel, opening the workbook once.**
+
+1. The transaction table holds the rows it held before, and no test rows.
+2. The month sheet used in Part 2b looks as it did at Part 2b step 1 — the same rows hidden.
+3. **File → Info → Version history**: the versions created today are the ones this test explains. Note how many.
+4. Close the workbook. Do not leave it open in Excel.
+
+**3.3 — Leave nothing running.**
+
+1. Sign out of the website.
+2. Close any second tab or device that had the site open.
+3. If the separately authorised script-identity check was run, the throwaway transaction from its step 3 is
+   deleted, and say so in the report.
+
+**If cleanup cannot be completed** — a test row will not delete, the count is wrong, or a band will not clear —
+stop there and report it with the request log. A workbook left in an unexpected state is a finding, not a
+failure to hide, and it is why this is a test copy.
+
+## Part 4. What to send back for Checkpoint 2
 
 - The read-only check results (all six lines).
 - The connection test result line, plus its "compared" and "not compared" lists.
 - The request log from **Copy log**.
-- What Version history showed.
+- What Version history showed, and how many versions today's test created.
+- From Part 2b: which rows were hidden before and after, whether the green band appeared and what it said,
+  whether the print preview showed the new row, and whether Run RefreshReports was needed.
+- From Part 3: the transaction count before and after, and confirmation that no test row remains.
 - The answers from prerequisite B.
 
 ## A separate, separately authorised check: does a script preserve a row's identity?

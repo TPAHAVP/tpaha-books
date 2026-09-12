@@ -9,6 +9,36 @@ or in the repository; nothing has connected to Microsoft 365; no production work
 
 ---
 
+## 2026-09-12 (sixth) — The deployment and test-copy walkthrough is written. **Nothing published; no live write**
+
+Codex approved `7740e6c`. `docs/checkpoint-2-runbook.md` is now the whole procedure, one step at a time, and
+three things were added or corrected.
+
+**Part 0, publishing — prepared, not run.** Confirm the tree is clean and all three suites pass; list exactly
+what will go out and prove nothing private is in it (`git diff --name-only origin/main..HEAD` filtered for
+`data/`, `.xlsx` and the scripts must print nothing); push; watch the Pages workflow; then verify what is being
+*served* rather than what was pushed — the site loads with no Test mode banner, and the deployed `js/config.js`
+hashes to `BC25AC…CE48`, the reviewed file. Undo is `git revert` and push, never a force-push.
+
+**Part 3, cleanup — new.** The connection test cleans up after itself and Part 2b's transaction is deleted by
+hand; this part is how both are proven. On the website: the count matches what it started at, no
+*TPAHA Books connection test* row, no Part 2b transaction, no green band, no paused band. In Excel: the table
+as before, the month sheet hidden exactly as at Part 2b step 1, Version history accounted for, workbook closed.
+Then sign out and close every other tab. A cleanup that cannot be completed is a finding to report, not
+something to tidy away.
+
+**A numbering defect fixed.** Part 2b had two steps numbered 4 — the RefreshReports fallback I added on
+2026-09-12 and the original "check the row is visible in Excel". Someone following it on the day would have
+done the fallback before the check it is a fallback *for*. Renumbered so the check comes first (step 4) and the
+repair second (step 5), and the closing summary now refers to step 7 rather than step 6.
+
+Part 4 (what to send back) now also asks for the Part 2b observations, whether RefreshReports was needed, and
+the transaction count before and after.
+
+No code changed; tests unchanged from `7740e6c`: 152 unit, 189 browser, 21 config.
+
+---
+
 ## 2026-09-12 (fifth) — The empty `LOG_Sorted` divergence is fixed. **For review; not published, no live write**
 
 The finding recorded in the entry below is closed. This app now keeps the invariant the workbook's own
