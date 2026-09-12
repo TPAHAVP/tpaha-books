@@ -156,13 +156,33 @@ export function expectedSortedRows(logValues) {
     .sort((a, b) => a.date.localeCompare(b.date) || idOrLast(a) - idOrLast(b) || a.rowIndex - b.rowIndex)
     .map(t => t.values);
 }
-/** Read-only: does LOG_Sorted already hold exactly those rows, in that order? Returns the counts for a message. */
-export function sortedTableMatches(logValues, sortedValues) {
-  const want = expectedSortedRows(logValues);
-  const have = (sortedValues || []).map(normalizeRow);
-  return { ok: sameMatrix(have, want), want, have };
+/**
+ * The body LOG_Sorted must hold: the rows above, or — when there are no transactions at all — exactly one
+ * blank row.
+ *
+ * The workbook's own `writeRows()` keeps both tables at `Math.max(1, rows.length)` body rows and writes a
+ * blank row when there is nothing to write, so an empty ledger leaves a one-row table, never a table with no
+ * body at all. This app matches that rather than deleting the table down to nothing: the scripts'
+ * `transactions()` filters all-blank rows before every comparison, so the placeholder reads as zero
+ * transactions on both sides, and nothing downstream has to cope with a table that has no body range.
+ */
+export const BLANK_LOG_ROW = () => LOG_COLUMNS.map(() => '');
+const txnCount = rows => rows.filter(r => !isBlankRow(r)).length;
+export function sortedBodyRows(logValues) {
+  const rows = expectedSortedRows(logValues);
+  return rows.length ? rows : [BLANK_LOG_ROW()];
 }
-const sortedTarget = log => expectedSortedRows(log.rows.map(r => r.values));
+/**
+ * Read-only: does LOG_Sorted already hold exactly that body, in that order? `transactions` is the number of
+ * real rows, which is 0 for the blank placeholder: a caller reporting to a member must say "0 transactions",
+ * not "1 row".
+ */
+export function sortedTableMatches(logValues, sortedValues) {
+  const want = sortedBodyRows(logValues);
+  const have = (sortedValues || []).map(normalizeRow);
+  return { ok: sameMatrix(have, want), want, have, transactions: want.filter(r => !isBlankRow(r)).length, present: have.filter(r => !isBlankRow(r)).length };
+}
+const sortedTarget = log => sortedBodyRows(log.rows.map(r => r.values));
 const rowFormatsOk = nf => Array.isArray(nf) && nf[2] === DATE_FORMAT && nf[5] === MONEY_FORMAT;
 /** 1-12 from an ISO date, 0 when it cannot be read. */
 const monthOfIso_or_number = v => (typeof v === 'number' ? (Number.isInteger(v) ? v : 0) : monthOfIso(v));
@@ -751,15 +771,19 @@ export class LedgerWorkbook {
       const want = sortedTarget(log);
       const body = await this.client.getTableBody(this.sortedTable);
       const current = body.values.map(normalizeRow);
-      if (sameMatrix(current, want)) { this.sortedStale = false; return { changed, rows: want.length, consistent: true }; }
+      if (sameMatrix(current, want)) { this.sortedStale = false; return { changed, rows: txnCount(want), consistent: true }; }
       changed = true;
       const p = parseAddress(body.address);
       const m = current.length, n = want.length, k = Math.min(m, n);
+      // The blank placeholder carries no value, so it is written as values only: giving an empty row the date
+      // and money formats would be writing formatting the workbook's own script never writes.
+      const formatsFor = rows => (rows.every(isBlankRow) ? undefined : rows.map(() => FORMAT_ROW));
       try {
-        if (k > 0) await this.client.patchRange(p.sheet, rangeAddress(null, p.r1, p.c1, p.r1 + k - 1, p.c1 + LOG_COLUMNS.length - 1), { values: want.slice(0, k), numberFormat: want.slice(0, k).map(() => FORMAT_ROW) });
+        if (k > 0) await this.client.patchRange(p.sheet, rangeAddress(null, p.r1, p.c1, p.r1 + k - 1, p.c1 + LOG_COLUMNS.length - 1), { values: want.slice(0, k), numberFormat: formatsFor(want.slice(0, k)) });
         if (n > m) {
           await this.client.addTableRows(this.sortedTable, want.slice(m));
-          await this.client.patchRange(p.sheet, rangeAddress(null, p.r1 + m, p.c1, p.r1 + n - 1, p.c1 + LOG_COLUMNS.length - 1), { numberFormat: want.slice(m).map(() => FORMAT_ROW) });
+          const added = formatsFor(want.slice(m));
+          if (added) await this.client.patchRange(p.sheet, rangeAddress(null, p.r1 + m, p.c1, p.r1 + n - 1, p.c1 + LOG_COLUMNS.length - 1), { numberFormat: added });
         } else {
           for (let i = m - 1; i >= n; i--) await this.client.deleteTableRow(this.sortedTable, i);
         }

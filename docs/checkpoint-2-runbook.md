@@ -141,18 +141,33 @@ green band cannot be cleared.
 (2026-09-12), so the remaining condition is Cody's word: do it only when he says so, and never while a web page
 has a save in flight.
 
-Why it is needed: the scripts rewrite the whole transaction table on every save and delete, including the
-Timestamp text this app uses to recognise its own rows. Nothing tested so far proves that a real Office Script
+Why it is needed: `SubmitEntry` and `DeleteTransaction` rewrite the **whole of `LOG_Table`** on every save and
+delete — `saveChange()` calls `writeRows(log, after)`, which sets every body row — and that includes the
+Timestamp text this app uses to recognise its own rows. Nothing tested so far proves a real Office Script
 preserves a nine-fraction-digit timestamp. The connection test in Part 2 never runs a script, and the unit test
 that simulates a rewrite proves only the mock's behaviour.
+
+**`RefreshReports` cannot stand in for this check.** It never writes `LOG_Table` — that is exactly what makes it
+safe as a repair — so running it proves nothing about whether a rewrite of that table preserves the website's
+row identity. Only the two buttons that rewrite `LOG_Table` can answer the question, and both of them change
+transactions. That is the awkward part of this check and the reason it needs its own authorisation and a test
+copy: proving the identity survives means letting a transaction-changing button run once.
+
+(`RefreshReports` does copy the Timestamp text into `LOG_Sorted` through the same `writeRows()` helper, so if it
+ever came back altered there, that would be worth reporting. It is a weaker, different signal: it would break
+`verifySorted` rather than the app's identity matching, which reads `LOG_Table`. Do not record it as the
+identity check.)
 
 On the test copy, one step at a time:
 
 1. Save one clearly labelled transaction from the web page. Wait until the line says Saved.
 2. Read that row's Timestamp text and write it down **exactly**, character for character. The LOG sheet in
    Excel shows it.
-3. With no web page saving anything, run the reviewed script action once.
-4. Read the row again and compare the Timestamp text with what you wrote down.
+3. With no web page saving anything, press **Run SubmitEntry** once to add a throwaway transaction of your own
+   from the ENTRY form (or **Run DeleteTransaction** once on that throwaway). Either rewrites every row of
+   `LOG_Table`, which is the point: it is the website's row you are watching, not the one you entered.
+4. Read the website's row again and compare its Timestamp text with what you wrote down.
+5. Delete the throwaway transaction afterwards, and say in the report that you did.
 
 Identical means the identity survives and the pilot can rely on it. Any difference means stop: do not retry an
 unconfirmed write, and send the before and after text. A changed identity is a design question, not a retry.

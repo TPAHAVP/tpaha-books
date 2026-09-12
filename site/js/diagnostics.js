@@ -161,8 +161,8 @@ async function runChecks() {
     // One shared rule with the adapter's rebuild, so the two can never disagree (review finding V1).
     const check = sortedTableMatches(logBody.values, sortedBody.values);
     row(SORTED_CHECK, check.ok, check.ok
-      ? `consistent (${check.want.length} rows)`
-      : `differs: ${check.have.length} rows present, ${check.want.length} expected, or a different order. This is the order the workbook's own Office Scripts require; the app rebuilds it after its next save and verifies the rebuild against a fresh read of LOG_Table.`);
+      ? `consistent (${check.transactions} transactions)`
+      : `differs: ${check.present} transactions present, ${check.transactions} expected, or a different order. This is the order the workbook's own Office Scripts require; the app rebuilds it after its next save and verifies the rebuild against a fresh read of LOG_Table.`);
   } else {
     row(SORTED_CHECK, false, 'could not compare because a table could not be read');
   }

@@ -9,6 +9,57 @@ or in the repository; nothing has connected to Microsoft 365; no production work
 
 ---
 
+## 2026-09-12 (fifth) — The empty `LOG_Sorted` divergence is fixed. **For review; not published, no live write**
+
+The finding recorded in the entry below is closed. This app now keeps the invariant the workbook's own
+`writeRows()` keeps.
+
+**The rule, in one place.** `sortedBodyRows(logValues)` returns the sorted transaction rows, or — when there are
+none — exactly one blank row. The rebuild writes that body; the read-only check compares against it. The
+transaction rule itself, `expectedSortedRows()`, is unchanged and still returns no phantom row, so the two
+questions "what should the table hold" and "which transactions are there" stay separate.
+
+**Verification counts transactions, not rows.** `sortedTableMatches()` now returns `transactions` (real rows
+wanted) and `present` (real rows found) beside `want`/`have`, and Diagnostics reports those. An empty ledger
+reads as "consistent (0 transactions)", never as one row. That is the same arithmetic the scripts do:
+`verifySorted` compares `ordered(log)` with `transactions(sorted)`, and `transactions()` filters all-blank rows.
+
+**The placeholder is written as values only.** Giving an empty row the date and money number formats would be
+writing formatting the workbook's own script never writes, so the rebuild omits `numberFormat` when every row
+it is writing is blank.
+
+### Tests — six new, all failing against the previous code
+Verified by reverting `sortedBodyRows` to its old return value: **146 passed, 6 failed**; with the fix,
+**152 passed, 0 failed**.
+
+| Test | What it pins |
+|---|---|
+| deleting the last transaction | `LOG_Sorted` holds exactly one blank row, not none; `LOG_Table` also keeps a body row |
+| the check accepts the placeholder | `ok: true`, `transactions: 0`, `present: 0`; and `expectedSortedRows([])` is still `[]` |
+| loading and rebuilding an empty ledger | the ledger loads with no transactions; `rebuildSorted()` reports consistent, `changed: false`, `rows: 0`, and sends **no write at all** — no repair loop |
+| a table left with no body row | repaired to the placeholder, and the writes carry **no `numberFormat`** |
+| the first transaction afterwards | replaces the placeholder instead of adding beside it — one row, no leftover blank — and deleting it again returns to the placeholder |
+| the Office Scripts' own checks | `validateLog` and `verifySorted` both accept the empty shape; `transactions(sorted)` is `[]`; the shape equals what `writeRows()` would leave, so pressing Run RefreshReports next changes nothing |
+
+W1, W2 and W2b are untouched: their tests still pass unchanged.
+
+### Also in this pass: what the script-identity check can and cannot use
+`RefreshReports` never writes `LOG_Table`, so running it **cannot** show whether a script rewrite preserves the
+website's row identity. Only `SubmitEntry` and `DeleteTransaction` rewrite that table, through
+`saveChange()` → `writeRows(log, after)`, and both change transactions — which is why that check needs its own
+authorisation and a test copy. The runbook now names the button to press, says to use a throwaway transaction
+and delete it afterwards, and records that `RefreshReports` copying the Timestamp into `LOG_Sorted` is a
+weaker, different signal that must not be logged as the identity check. Mapping §7 says the same.
+
+### Tests (2026-09-12, this folder)
+- `npm test`: **152 passed, 0 failed** (was 146).
+- `npx playwright test`: **189 passed, 0 failed** (unchanged).
+- `npm run verify:config`: 21 passed.
+
+Not published, and no live write has been run.
+
+---
+
 ## 2026-09-12 (fourth) — `RefreshReports` supplied and reviewed. **No code change; not published, no live write**
 
 Codex approved `68db038` (W2b). Cody then supplied the fourth Office Script. It is saved beside the other three
@@ -53,8 +104,7 @@ Verified against the mock: deleting all thirteen sample transactions leaves `LOG
 Its reach is small and it cannot arise in the pilot — the workbook holds 25 transactions and the test plan never
 empties it — but it is a real difference from the workbook's own invariant, and what a zero-row table does to
 the month sheets' formulas, or to Graph's `dataBodyRange`, has not been tested. Recommended fix: match the
-script and leave one blank row. **Not done in this pass**, which was documentation; it needs a code change, a
-test and a review.
+script and leave one blank row. **Done on 2026-09-12** — see the entry above.
 
 No code changed. Tests unchanged from `68db038`: 146 unit, 189 browser, 21 config.
 

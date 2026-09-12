@@ -235,6 +235,7 @@ satisfy both:
 | Script check | What it demands | How this app satisfies it |
 |---|---|---|
 | `validateLog` | every non-blank row has a unique, positive, safe-integer TransactionID; Date is an integer serial **inside the workbook year**; Type is Deposit or Withdrawal; Category matches that Type in LISTS; Amount is positive with at most two decimals | The entry form enforces the same rules before a save: `validateEntry` in `site/js/ledger/model.js` checks the year, and `entryToRow` writes an integer serial and rounds the amount to two decimals. Unit test: "every row this app writes passes the scripts' own validateLog, after an add, a correction and a delete". |
+| `writeRows` (the shape it leaves) | both tables keep **at least one body row** — `Math.max(1, rows.length)` — so an empty ledger leaves one blank row, never a table with no body at all. `transactions()` filters that blank row out before every comparison, so it reads as zero transactions | This app keeps the same invariant: `sortedBodyRows()` returns the sorted rows, or one blank row when there are none, and the verification counts transactions rather than body rows. **This was a divergence, found on reviewing `RefreshReports` and fixed 2026-09-12**: the rebuild previously deleted `LOG_Sorted` down to zero rows when the last transaction was deleted, a shape the workbook's own scripts never produce and whose effect on the month formulas and on Graph's `dataBodyRange` was untested. Unit tests: the six "empty ledger" tests. |
 | `verifySorted` | `LOG_Sorted` equals `LOG` sorted by **Date serial, then TransactionID**, compared as whole rows. One rule, `expectedSortedRows()`, is exported from the adapter and used by both the rebuild and the read-only Diagnostics check, after the two briefly held separate copies and disagreed (review finding V1) | This app now sorts LOG_Sorted the same way. **This was a defect, fixed 2026-09-10**: it previously broke ties by table position, which diverges as soon as a correction moves a row to the end of LOG, and the scripts would then have refused to run until someone ran RefreshReports. Unit test: "LOG_Sorted keeps the order the scripts require … including after a correction moves a row to the end of LOG". |
 
 **Two differences that are not defects but must be known:**
@@ -265,6 +266,9 @@ Two things follow, and both matter here:
   answer when the month rows are wrong and the website cannot fix them (§8).
 - **It is still a writer.** It rewrites `LOG_Sorted` and the month sheets' row visibility, so pressing it while
   a website save is in flight is a second writer on the same tables, exactly like the other two buttons.
+- **It cannot prove the website's row identity survives a script.** That question is about `LOG_Table`, which
+  only `SubmitEntry` and `DeleteTransaction` rewrite. `RefreshReports` leaves that table untouched, so it is
+  no evidence either way; the separately authorised check in the runbook must use one of the other two.
 
 It also refuses to run at all if `validateLog` fails — every transaction must have a unique positive whole
 number, a date inside the workbook's year, a Deposit/Withdrawal type, a category matching that type in LISTS,

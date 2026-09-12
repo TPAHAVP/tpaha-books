@@ -4,7 +4,7 @@ import { MockWorkbook } from '../../site/js/workbook/mock-excel.js';
 import { ExcelClient, ExcelApiError } from '../../site/js/workbook/excel-client.js';
 import {
   LedgerWorkbook, ConflictError, VerificationError, UnresolvedOperationError, MarkerCollisionError,
-  rowFingerprint, rowToTxn, makeMarker, identityOf, expectedSortedRows, sortedTableMatches,
+  rowFingerprint, rowToTxn, makeMarker, identityOf, expectedSortedRows, sortedTableMatches, sortedBodyRows,
   visibilityRuns, monthOfIso, REPORT_FORMATTING_SAVED, REPORT_FORMATTING_DELETED,
 } from '../../site/js/workbook/ledger-workbook.js';
 import { SAMPLE_WORKBOOK as fixture } from '../../site/js/workbook/sample-workbook.js';
@@ -981,4 +981,96 @@ test('W1: a month sheet re-protected against row formatting is reported, with th
   assert.match(res.reportFormatting.detail, /Format rows/, 'the message names the protection setting');
   assert.match(res.reportFormatting.detail, /Graph cannot supply a password/);
   assert.equal(wb.halted, null);
+});
+
+// ------------------------------------------------------- an empty ledger keeps the workbook's own placeholder
+// RefreshReports (read 2026-09-12) writes both tables with writeRows(), which keeps them at Math.max(1, rows)
+// body rows and writes a blank row when there is nothing to write. An empty LOG_Sorted with NO body row is a
+// shape the workbook's own scripts never produce, and what it does to the month formulas is untested. This app
+// keeps the same invariant.
+const BLANK = ['', '', '', '', '', '', '', '', ''];
+const emptyTheLedger = async wb => {
+  for (const t of (await wb.load()).transactions) await wb.deleteTransaction((await wb.load()).transactions.find(x => x.id === t.id));
+};
+const sortedRows = mock => mock.table('LOG_Sorted_Table').rows;
+
+test('empty ledger: deleting the last transaction leaves LOG_Sorted with exactly one blank row, not none', async () => {
+  const { mock, wb } = setup();
+  await emptyTheLedger(wb);
+  assert.deepEqual(sortedRows(mock), [BLANK], 'one blank placeholder, as writeRows() would leave');
+  assert.equal(nonBlank(sortedRows(mock)).length, 0, 'and it counts as no transactions');
+  assert.deepEqual(nonBlank(mock.table('LOG_Table').rows), [], 'the transaction table is empty of transactions too');
+  assert.ok(mock.table('LOG_Table').rows.length >= 1, 'and it also keeps a body row');
+});
+
+test('empty ledger: the check accepts the placeholder and reports zero transactions', async () => {
+  const { mock, wb } = setup();
+  await emptyTheLedger(wb);
+  const check = sortedTableMatches(mock.table('LOG_Table').rows, sortedRows(mock));
+  assert.equal(check.ok, true, 'the placeholder is what the rule wants, not a difference to repair');
+  assert.equal(check.transactions, 0, 'reported as zero transactions, never as one row');
+  assert.equal(check.present, 0);
+  assert.deepEqual(sortedBodyRows([]), [BLANK]);
+  assert.deepEqual(sortedBodyRows(null), [BLANK]);
+  assert.deepEqual(sortedBodyRows([BLANK]), [BLANK], 'a log of nothing but blanks is still an empty ledger');
+  assert.deepEqual(expectedSortedRows([]), [], 'the transaction rule itself is unchanged: no phantom row');
+});
+
+test('empty ledger: loading it works, and rebuilding it is a no-op rather than a repair loop', async () => {
+  const { mock, wb } = setup();
+  await emptyTheLedger(wb);
+  const snap = await wb.load();
+  assert.deepEqual(snap.transactions, [], 'an empty ledger loads');
+  const mark = mock.log.length;
+  const r = await wb.rebuildSorted();
+  assert.equal(r.consistent, true);
+  assert.equal(r.changed, false, 'nothing to change: the placeholder already is the target');
+  assert.equal(r.rows, 0, 'and the count is transactions, not body rows');
+  assert.deepEqual(mock.log.slice(mark).filter(e => e.method !== 'GET'), [], 'so it writes nothing at all');
+  assert.deepEqual(sortedRows(mock), [BLANK]);
+});
+
+test('empty ledger: a table left with no body row at all is repaired to the placeholder, values only', async () => {
+  const { mock, wb } = setup();
+  await emptyTheLedger(wb);
+  mock.table('LOG_Sorted_Table').rows.length = 0;                      // as the previous release left it
+  const mark = mock.log.length;
+  const r = await wb.rebuildSorted();
+  assert.equal(r.consistent, true, 'the rebuild puts the placeholder back');
+  assert.deepEqual(sortedRows(mock), [BLANK]);
+  const writes = mock.log.slice(mark).filter(e => e.method !== 'GET');
+  const formats = writes.filter(e => { try { return JSON.parse(e.body || '{}').numberFormat; } catch { return false; } });
+  assert.deepEqual(formats, [], 'a blank placeholder is written as values only: no date or money format on an empty row');
+});
+
+test('empty ledger: the first transaction afterwards replaces the placeholder instead of adding beside it', async () => {
+  const { mock, wb } = setup();
+  await emptyTheLedger(wb);
+  const res = await wb.addTransaction(entry({ date: '2026-09-06', description: 'First after empty' }), { marker: makeMarker() });
+  assert.equal(res.txn.description, 'First after empty');
+  const sorted = sortedRows(mock);
+  assert.equal(sorted.length, 1, 'one row, not the placeholder plus one');
+  assert.equal(sorted.filter(r => r.every(v => v === '')).length, 0, 'and no blank row left over');
+  assert.equal(sorted[0][6], 'First after empty');
+  assert.equal(sortedTableMatches(mock.table('LOG_Table').rows, sorted).ok, true);
+  assert.equal(sortedTableMatches(mock.table('LOG_Table').rows, sorted).transactions, 1);
+  await wb.deleteTransaction((await wb.load()).transactions.find(t => t.description === 'First after empty'));
+  assert.deepEqual(sortedRows(mock), [BLANK], 'and back to the placeholder when it goes again');
+});
+
+test('empty ledger: the workbook\'s own scripts accept what this app leaves behind', async () => {
+  const { mock, wb } = setup();
+  const categories = mock.table('LISTS_Categories').rows;
+  const year = (await wb.load()).year;
+  await emptyTheLedger(wb);
+  const log = mock.table('LOG_Table').rows, sorted = sortedRows(mock);
+  assert.doesNotThrow(() => scriptValidateLog(log, categories, year), 'validateLog passes over an empty log');
+  assert.ok(scriptVerifySorted(log, sorted), 'verifySorted accepts the placeholder: transactions() filters it out');
+  assert.deepEqual(scriptTransactions(sorted), [], 'the scripts see zero transactions, as this app does');
+  assert.deepEqual(scriptOrdered(log), []);
+  // writeRows() would leave exactly this, so a treasurer pressing RefreshReports next changes nothing.
+  assert.deepEqual(sorted, [BLANK]);
+  await wb.addTransaction(entry({ date: '2026-02-02', description: 'After the scripts would run' }), { marker: makeMarker() });
+  assert.ok(scriptVerifySorted(mock.table('LOG_Table').rows, sortedRows(mock)), 'and after the next add too');
+  assert.doesNotThrow(() => scriptValidateLog(mock.table('LOG_Table').rows, categories, year));
 });
