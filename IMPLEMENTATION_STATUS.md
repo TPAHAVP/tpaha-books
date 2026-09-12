@@ -9,6 +9,62 @@ or in the repository; nothing has connected to Microsoft 365; no production work
 
 ---
 
+## 2026-09-11 (live, read-only) — First connection to Microsoft 365 succeeded. **Partial Checkpoint 2 evidence, not approval**
+
+Reported by Cody after running the Diagnostics page against the pilot copy `TPAHA_2026 (1).xlsx`. The account
+used was an assigned board account (the Vice-President); the person's name is kept out of this file because it
+is published, and is in the local notes. **No write of any kind was run, and the connection write test was not
+started.**
+
+### What happened
+| | |
+|---|---|
+| Sign-in | An assigned account completed the Microsoft redirect and returned to the site |
+| Workbook | Identified and confirmed on the Diagnostics page |
+| Read-only checks | All six passed |
+| Transaction table | Read back with the row count the treasurer expected; the exact figure is in the local notes |
+| Sorted helper table | Matches the transaction table |
+| Requests | Every logged content request was a GET returning 200 |
+| Write test | Not run |
+
+The one non-GET such a run makes is the workbook session this app opens before its first read
+(`POST …/workbook/createSession`), which changes no cell. Everything else was a read.
+
+### What this establishes, for the first time against the real service
+- The **hosted sign-in works end to end**: the MSAL redirect round-trip on the GitHub Pages address, the
+  registration, admin consent, the single-tenant restriction and assignment all function together, and a token
+  was issued and accepted by Microsoft Graph. None of that could be shown by any amount of local testing.
+- **Graph can open this workbook and this app can read it.** The adapter's read path works against real data:
+  the column headers match, the table body parses, the year cell and the prior-year balance cell are the
+  expected shapes, and the tables are found by name.
+- **The sorted helper table in the online copy already satisfies the date-then-transaction-number order** that
+  the workbook's own Office Scripts require and that the V1 fix aligned this app to. Had the two disagreed,
+  that check would have failed.
+- No throttling, no session error, no missing sheet or table: every request returned 200.
+
+### What it does not establish, and must not be read as
+- **Nothing about writing.** No row was added, corrected or deleted; no number format was set; no helper-table
+  rebuild ran. Everything in `docs/workbook-mapping.md` §3 about `rows/add`, the checked delete, the
+  `itemAt(index=n)` format PATCH and the rebuild loop remains unverified against the real service.
+- **Nothing about the nine-digit timestamp.** Whether Excel stores it unchanged, and whether an Office Script's
+  whole-table rewrite preserves it, is still open. That is the separately authorised check in the runbook.
+- **Nothing about the Office Scripts**, which were not run.
+- **Nothing about refusal.** Only an assigned account signed in. That an **unassigned** account is turned away
+  with AADSTS50105 has not been observed and should be.
+- **Nothing about phones.** The browser suite uses two engines, never a device.
+- **Nothing about §5 of the mapping.** Those findings (the Annual sheet fixes, the duplicate transaction
+  numbers) were made against the local file. The six read-only checks do not examine the Annual sheet's
+  formulas or look for duplicate numbers, and the online copy is not the same snapshot as the local one. Worth
+  confirming before the pilot, because duplicate numbers would make the workbook's own scripts refuse to run.
+
+### Where this leaves Checkpoint 2
+Part of the evidence is in hand. Checkpoint 2 is not met and no approval follows from this. Still required:
+`RefreshReports` supplied and reviewed; the hidden-month-row decision; Cody's authorisation; then the
+connection write test and the separate script-identity check, with their logs and before-and-after identity
+evidence.
+
+---
+
 ## 2026-09-11 (published) — The configured site is live; sign-in testing is next
 
 Pushed `b18dd2e..7625121` on Cody's instruction: `db30a38` (the registration configuration) and `7625121`

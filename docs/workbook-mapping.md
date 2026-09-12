@@ -1,8 +1,12 @@
 # Workbook mapping: TPAHA_2026 ledger
 
 Source inspected read-only: `TPAHA_2026 (1).xlsx` in the project folder, dated 2026-09-06 (saved by Excel Online).
-The online copy in the pilot OneDrive has **not** been inspected yet; its identity, extension and
-contents must be confirmed live (Diagnostics page, "Identify workbook") before any write.
+
+The online copy in the pilot OneDrive was **read** through this app for the first time on 2026-09-11: it was
+identified and confirmed on the Diagnostics page, and the six read-only checks passed. That establishes its
+identity and structure. It does **not** establish that its contents match this document's §5 findings, which
+were made against the local file: the read-only checks do not look at the Annual sheet's formulas or at
+duplicate transaction numbers, and the two copies are not the same snapshot. Nothing has been written to it.
 
 ## 1. Structure
 
@@ -168,6 +172,10 @@ The pilot copy is named "TPAHA_2026 (1)" in the owner's OneDrive for Business. B
 extension, folder path, size and last-modified time. The member confirms the `.xlsx` file; the
 app then addresses it by drive id and item id (stored in that browser only, per tenant and
 account). Ids are opaque and are not sharing links.
+
+Done on 2026-09-11 by an assigned board account: the picker listed the intended `.xlsx`, it was confirmed, and
+every content request that followed was a GET that returned 200. The only non-GET in that run is the workbook
+session this app opens before its first read (`POST …/workbook/createSession`), which changes no cell.
 
 ## 5. Findings to report (not changed by the app)
 

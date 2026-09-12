@@ -56,9 +56,10 @@ Not a blocker for the setup work, but settle it before the pilot runs.
 carries its ids (verified by `npm run verify:config`, 21 checks). The deployed `js/config.js` was checked
 byte-for-byte against the committed file. The live site now offers Microsoft sign-in.
 
-Still to confirm by hand, all read-only: an assigned account completes the redirect and returns to the site; an
-unassigned account is refused by Microsoft (AADSTS50105); the workbook picker lists the intended file; the six
-read-only checks pass. Signing in, choosing a workbook and running those checks issue GET requests only.
+**Steps 1 to 3 of Part 2 were completed on 2026-09-11 and passed**: an assigned account signed in, the picker
+listed the intended `.xlsx`, it was confirmed, and all six read-only checks passed with every content request
+returning 200. Still to confirm by hand: that an **unassigned** account is refused by Microsoft (AADSTS50105),
+and the same sign-in on a real phone. Step 4, the write test, remains unauthorised.
 
 `docs/setup-guide.md` parts A to D: the site published over HTTPS, the Entra app registration (single tenant,
 SPA redirect URI = the site address, `Files.ReadWrite` + `User.Read`, admin consent, **no client secret**),
