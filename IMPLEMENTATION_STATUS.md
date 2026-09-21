@@ -9,6 +9,26 @@ or in the repository; nothing has connected to Microsoft 365; no production work
 
 ---
 
+## 2026-09-20 (later) — **Published.** Part 0 run in full; every verification passed. **No workbook write**
+
+Cody authorised publishing. Runbook Part 0 was followed step by step:
+
+| Step | Result |
+|---|---|
+| 0.1 tree and suites | `git status` empty; `npm test` 152/0; Playwright 189 passed; `verify:config` 21/0 |
+| 0.2 contents | 8 commits `9e464cd`…`e5a913a`, 15 files: site code, tests, docs. Private-file check (`data/`, `.xlsx`, scripts) printed nothing. After-hashes re-derived at HEAD matched the runbook table |
+| 0.3 push | `6e19eb0..e5a913a  main -> main` |
+| 0.4 deployment | `gh` is not installed on this machine, so the live site was polled instead: `js/save/report-formatting.js` went from 404 to **200 about ten seconds after the push** |
+| 0.5 served files | `report-formatting.js` 200 `49c85f6f…02cf0` ✓ · `ledger-workbook.js` 200 `2cddfca7…261a` ✓ (was `20cd704c…b7ea`) · `config.js` 200 `bc25ac6c…ce48` ✓ unchanged · `ledger.html` 200 with the report band element present |
+| 0.6 | Nobody signed in |
+
+**Deployed commit: `e5a913a`.** The live site at `https://tpahavp.github.io/tpaha-books/` now carries the
+monthly report-row feature and every review fix through the identity-check cleanup.
+
+No workbook write has been run. Parts 2, 2b and 3 wait on a separate authorisation.
+
+---
+
 ## 2026-09-20 — Script-identity check: cleanup completed, and made conditional. **Nothing published; no live write**
 
 Reviewer's correction: the separately authorised script-identity check deleted the Excel throwaway afterwards

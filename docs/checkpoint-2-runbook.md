@@ -10,7 +10,12 @@ to the developer.
 
 ---
 
-## Part 0. Publish the reviewed code — **prepared, not yet run**
+## Part 0. Publish the reviewed code — **run on 2026-09-20, all checks passed**
+
+Result: `e5a913a` deployed. 0.1 clean tree, 152 / 189 / 21 passing. 0.2 eight commits, 15 files, private-file
+check empty. 0.3 pushed `6e19eb0..e5a913a`. 0.4 the new file answered 200 within about ten seconds. 0.5 every
+hash matched the table below, `config.js` unchanged, ledger page 200 with the report band present. Nobody signed
+in. The record of the run is in `IMPLEMENTATION_STATUS.md`; the procedure is kept below for the next release.
 
 Codex approved `7740e6c` on 2026-09-12. The unpublished work is `9e464cd`, `d5a0faa`, `68db038`, `fdab0a1`,
 `7740e6c` — the monthly report rows and the four review fixes that followed — plus the commit that added this
