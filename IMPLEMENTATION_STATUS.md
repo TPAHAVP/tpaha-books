@@ -9,6 +9,27 @@ or in the repository; nothing has connected to Microsoft 365; no production work
 
 ---
 
+## 2026-09-20 — Script-identity check: cleanup completed, and made conditional. **Nothing published; no live write**
+
+Reviewer's correction: the separately authorised script-identity check deleted the Excel throwaway afterwards
+but never the website's own test entry, so a "clean" run would have left one test transaction in the workbook.
+It also did not say what to do with cleanup when the comparison fails.
+
+Fixed in `docs/checkpoint-2-runbook.md`:
+- **Step 0** records the transaction count before anything is added, so "back to the original" has a number.
+- **After an identical comparison** with no paused band and no incident: delete the website's entry from the
+  website, delete the Excel throwaway from the website too (one writer, no further script runs), Refresh and
+  confirm the count matches step 0, confirm in Excel, report both deletions and both counts. Deleting the
+  website's row is itself evidence — the app finds it by the identity that was just rewritten.
+- **If the text differs, or a paused band or incident is showing: stop before cleanup.** Nothing is deleted,
+  no Refresh, no retry, no workbook button. The rows are the evidence and deleting them destroys it; the
+  reviewer says how cleanup happens.
+- Part 3.3 now refers to that cleanup and covers the stopped case.
+
+Documentation only; no code changed. Tests unchanged from `7740e6c`: 152 unit, 189 browser, 21 config.
+
+---
+
 ## 2026-09-12 (seventh) — Deployment verification now uses a file this release actually changes. **Nothing published; no live write**
 
 Three corrections to the walkthrough, at Cody's direction.

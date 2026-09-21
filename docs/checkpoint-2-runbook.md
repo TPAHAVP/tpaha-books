@@ -240,8 +240,9 @@ adds a real transaction that you delete by hand. This part is how you prove both
 
 1. Sign out of the website.
 2. Close any second tab or device that had the site open.
-3. If the separately authorised script-identity check was run, the throwaway transaction from its step 3 is
-   deleted, and say so in the report.
+3. If the separately authorised script-identity check was run, its own cleanup (steps 5 to 7 there) is done:
+   **both** the website's test entry and the Excel throwaway are deleted and the count is back to its step 0
+   value — unless that check stopped, in which case nothing is deleted and the report says so.
 
 **If cleanup cannot be completed** — a test row will not delete, the count is wrong, or a band will not clear —
 stop there and report it with the request log. A workbook left in an unexpected state is a finding, not a
@@ -281,19 +282,35 @@ ever came back altered there, that would be worth reporting. It is a weaker, dif
 `verifySorted` rather than the app's identity matching, which reads `LOG_Table`. Do not record it as the
 identity check.)
 
-On the test copy, one step at a time:
+On the test copy, one step at a time. This check adds **two** transactions — one from the website, one from
+Excel — and both must be gone at the end.
 
+0. On the website, press **Refresh** and write down the transaction count. This is the number to get back to.
 1. Save one clearly labelled transaction from the web page. Wait until the line says Saved.
 2. Read that row's Timestamp text and write it down **exactly**, character for character. The LOG sheet in
    Excel shows it.
 3. With no web page saving anything, press **Run SubmitEntry** once to add a throwaway transaction of your own
-   from the ENTRY form (or **Run DeleteTransaction** once on that throwaway). Either rewrites every row of
-   `LOG_Table`, which is the point: it is the website's row you are watching, not the one you entered.
-4. Read the website's row again and compare its Timestamp text with what you wrote down.
-5. Delete the throwaway transaction afterwards, and say in the report that you did.
+   from the ENTRY form. It rewrites every row of `LOG_Table`, which is the point: it is the website's row you
+   are watching, not the one you entered. Close the workbook in Excel afterwards.
+4. Read the website's row again and compare its Timestamp text with what you wrote down. Then, on the website,
+   press **Refresh** and look at the top of the page.
 
-Identical means the identity survives and the pilot can rely on it. Any difference means stop: do not retry an
-unconfirmed write, and send the before and after text. A changed identity is a design question, not a retry.
+**The comparison decides what happens next.**
+
+- **Identical, and the website shows no paused band and no incident** — the identity survived. Clean up:
+  5. On the website, delete the transaction you saved in step 1. The website looks the row up by the identity
+     that was just rewritten, so this delete is itself part of the evidence: it should find the row and remove
+     it with no conflict.
+  6. On the website, delete the throwaway transaction from step 3 the same way. One writer, no further script
+     runs.
+  7. Press **Refresh**. The count matches step 0. Open the workbook in Excel once and confirm neither row is in
+     the LOG sheet, then close it.
+  8. Report: the before and after Timestamp text, that both rows were deleted, and the count before and after.
+- **Any difference in the text, or the website shows a paused band or an unresolved incident** — **stop before
+  cleaning up.** Do not delete either row, do not press Refresh again, do not retry an unconfirmed write, and
+  do not press any workbook button. The rows as they stand are the evidence; deleting them destroys it. Send
+  the before and after text, what the band says, and the request log, and wait. Cleanup happens only when the
+  reviewer says how. A changed identity is a design question, not a retry.
 
 ## Stop conditions
 
