@@ -202,9 +202,19 @@ export class ExcelClient {
   }
   getTableBody(table) { return this.request('GET', this.tableBodyPath(table)); }
   addTableRows(table, values2D) { return this.request('POST', `/workbook/tables/${enc(table)}/rows/add`, { body: { values: values2D } }); }
-  deleteRowPath(table, index) { return `/workbook/tables/${enc(table)}/rows/${Number(index)}`; }
+  /**
+   * A table row is addressed by position through the collection's itemAt(index=N) function, never as
+   * rows/N. The reference for "TableRow: delete" shows rows/{index}, but workbookTableRow has no id property
+   * (only index and values), the SDK snippets on that same page key on a row *id*, and the live service
+   * answers rows/N with 404 ApiNotFound: "The API you are trying to use could not be found. It may be available
+   * in a newer version of Excel." This was met on the first live connection test (2026-09-20) and matches the
+   * Microsoft Q&A reports for both DELETE and PATCH on rows/{index}. The row range PATCH below already used
+   * itemAt and worked live in that same test. Evidence: docs/workbook-mapping.md §2.
+   */
+  rowPath(table, index) { return `/workbook/tables/${enc(table)}/rows/itemAt(index=${Number(index)})`; }
+  deleteRowPath(table, index) { return this.rowPath(table, index); }
   deleteTableRow(table, index) { return this.request('DELETE', this.deleteRowPath(table, index)); }
-  rowRangePath(table, index) { return `/workbook/tables/${enc(table)}/rows/itemAt(index=${Number(index)})/range`; }
+  rowRangePath(table, index) { return `${this.rowPath(table, index)}/range`; }
   getTableRowRange(table, index) { return this.request('GET', this.rowRangePath(table, index)); }
   patchTableRowRange(table, index, props) { return this.request('PATCH', this.rowRangePath(table, index), { body: props }); }
   calculate(type = 'Full') { return this.request('POST', '/workbook/application/calculate', { body: { calculationType: type } }); }

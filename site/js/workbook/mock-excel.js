@@ -304,7 +304,7 @@ export class MockWorkbook {
     const rel = wb >= 0 ? path.slice(wb) : path.replace(/^.*\/items\/[^/?]+/, '');
     const body = opts.body ? JSON.parse(opts.body) : {};
 
-    const matches = (f, p) => !f.match || (f.match instanceof RegExp ? f.match.test(p) : p.includes(String(f.match)));
+    const matches = (f, p) => (!f.method || f.method === method) && (!f.match || (f.match instanceof RegExp ? f.match.test(p) : p.includes(String(f.match))));
     const injected = this.failures.findIndex(f => matches(f, path));
     const failure = injected >= 0 ? this.failures.splice(injected, 1)[0] : null;
     const fail = () => {
@@ -386,13 +386,17 @@ export class MockWorkbook {
         const index = this._appendRows(t, body.values); this._touch();
         return respond(ok({ index, values: body.values }));
       }
-      const rowM = /^rows\/(?:itemAt\(index=(\d+)\)|(\d+))(?:\/(range))?$/.exec(sub);
+      // rows/N is what the reference page shows and what the live service refuses (2026-09-20): 404 ApiNotFound,
+      // for DELETE, GET and PATCH alike. The mock refuses it the same way so a test cannot pass on a path
+      // Microsoft rejects. Only rows/itemAt(index=N) addresses a row here.
+      if (/^rows\/\d+(?:\/range)?$/.test(sub)) return graphError(404, 'ApiNotFound', '', 'The API you are trying to use could not be found. It may be available in a newer version of Excel.');
+      const rowM = /^rows\/itemAt\(index=(\d+)\)(?:\/(range))?$/.exec(sub);
       if (rowM) {
-        const idx = Number(rowM[1] ?? rowM[2]);
+        const idx = Number(rowM[1]);
         if (idx < 0 || idx >= t.bodyRows) return graphError(400, 'BadRequest', 'invalidArgument', `Row index ${idx} out of range`);
         const r = t.headerRow + 1 + idx;
         const a = { r1: r, r2: r, c1: t.colStart, c2: t.colStart + t.colCount - 1 };
-        if (rowM[3] === 'range') {
+        if (rowM[2] === 'range') {
           if (method === 'GET') return respond(ok(this._rangeJson(t.sheet, a)));
           if (method === 'PATCH') return respond(this._patchRange(t.sheet, a, body));
         } else {

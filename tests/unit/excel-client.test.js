@@ -143,7 +143,7 @@ test('batch: sequential sub-requests share the session, return per-item results,
   await client.openSession();
   const results = await client.batch([
     { method: 'GET', path: '/workbook/tables/LOG_Table/dataBodyRange?$select=address,values,rowCount' },
-    { method: 'DELETE', path: '/workbook/tables/LOG_Table/rows/1' },
+    { method: 'DELETE', path: '/workbook/tables/LOG_Table/rows/itemAt(index=1)' },
   ]);
   assert.equal(results.length, 2);
   assert.equal(results[0].status, 200);
@@ -153,7 +153,7 @@ test('batch: sequential sub-requests share the session, return per-item results,
   const batchEntry = mock.log.find(e => /\$batch$/.test(e.url));
   assert.ok(batchEntry.sessionId, 'the batch request itself carries the session header');
   mock.failNext({ match: /\$batch$/, networkError: true });
-  await assert.rejects(() => client.batch([{ method: 'DELETE', path: '/workbook/tables/LOG_Table/rows/1' }]), e => e instanceof ExcelApiError && e.ambiguous === true);
+  await assert.rejects(() => client.batch([{ method: 'DELETE', path: '/workbook/tables/LOG_Table/rows/itemAt(index=1)' }]), e => e instanceof ExcelApiError && e.ambiguous === true);
   assert.equal(mock.log.filter(e => /\$batch$/.test(e.url)).length, 2, 'a failed batch is never resent');
 });
 

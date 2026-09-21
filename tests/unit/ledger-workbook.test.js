@@ -370,7 +370,7 @@ test('R5: a lost response on the cleanup DELETE is verified by reading; a delete
   const { mock, wb } = setup();
   const snap = await wb.load();
   const ref = snap.transactions.find(t => t.id === 2);
-  mock.failNext({ match: /LOG_Table\/rows\/\d+$/, networkError: true, afterApply: true });
+  mock.failNext({ match: /LOG_Table\/rows\/itemAt\(index=\d+\)$/, networkError: true, afterApply: true });
   const t2 = await wb.updateTransaction(ref, { amount: 90 });
   assert.equal(t2.amount, 90);
   assert.equal(mock.table('LOG_Table').rows.filter(r => r[0] === 2).length, 1, 'the delete had applied; the read proved it');
@@ -379,7 +379,7 @@ test('R5: a lost response on the cleanup DELETE is verified by reading; a delete
   // A DELETE that fails BEFORE applying: the old copy remains -> duplicate copy, paused, explicit repair, verified resolution.
   const snap2 = await wb.load();
   const ref3 = snap2.transactions.find(t => t.id === 3);
-  mock.failNext({ match: /LOG_Table\/rows\/\d+$/, networkError: true });
+  mock.failNext({ match: /LOG_Table\/rows\/itemAt\(index=\d+\)$/, networkError: true });
   let err;
   try { await wb.updateTransaction(ref3, { amount: 46 }); } catch (e) { err = e; }
   assert.ok(err instanceof UnresolvedOperationError && err.kind === 'duplicate-copy', String(err));
@@ -1073,4 +1073,64 @@ test('empty ledger: the workbook\'s own scripts accept what this app leaves behi
   await wb.addTransaction(entry({ date: '2026-02-02', description: 'After the scripts would run' }), { marker: makeMarker() });
   assert.ok(scriptVerifySorted(mock.table('LOG_Table').rows, sortedRows(mock)), 'and after the next add too');
   assert.doesNotThrow(() => scriptValidateLog(mock.table('LOG_Table').rows, categories, year));
+});
+
+
+// ------------------------------------------------------------------ the first live connection test (2026-09-20)
+// The DELETE of the test row was refused by the real service: 404 ApiNotFound on LOG_Table/rows/{index}, the path
+// the reference page shows. The mock had accepted that path, so nothing here had ever objected. These pin the
+// corrected path and replay the refusal.
+const ROW_BY_INDEX = /\/rows\/\d+(\/|$)/;
+const ROW_BY_ITEM_AT = /\/rows\/itemAt\(index=\d+\)(\/|$)/;
+const deleteUrls = mock => mock.log.filter(e => e.method === 'DELETE').map(e => e.url);
+
+test('live 2026-09-20: every DELETE this app sends addresses the row through itemAt(index=N), never rows/N', async () => {
+  const { mock, wb } = setup();
+  await wb.load();
+  await wb.deleteTransaction((await wb.load()).transactions.find(t => t.id === 13));                // a delete
+  await wb.updateTransaction((await wb.load()).transactions.find(t => t.id === 5), { amount: '1' });   // a correction: its cleanup delete
+  await wb.addTransaction(entry({ date: '2026-09-06', description: 'shrink me' }), { marker: makeMarker() });
+  mock.table('LOG_Sorted_Table').append([99, 'x', 46300, 'Deposit', 'Membership', 1, 'surplus', '', '']);   // a surplus helper row
+  await wb.rebuildSorted();                                                                          // the rebuild's delete
+  const urls = deleteUrls(mock);
+  assert.ok(urls.length >= 3, `expected a delete, a correction cleanup and a helper-table shrink; got ${urls.length}`);
+  assert.deepEqual(urls.filter(u => ROW_BY_INDEX.test(u)), [], 'no DELETE uses the rows/N form the service refuses');
+  assert.ok(urls.every(u => ROW_BY_ITEM_AT.test(u)), `every DELETE uses itemAt: ${urls.join(' ')}`);
+  assert.ok(mock.log.some(e => e.method === 'PATCH' && ROW_BY_ITEM_AT.test(e.url)), 'and the row-range PATCH, which worked live, uses the same addressing');
+});
+
+test('live 2026-09-20 replayed: a DELETE the service refuses with 404 ApiNotFound deletes nothing, is not retried, pauses nothing, and surfaces as the error it was', async () => {
+  const { mock, wb } = setup();
+  const snap = await wb.load();
+  const ref = snap.transactions.find(t => t.id === 13);
+  mock.failNext({ method: 'DELETE', match: /LOG_Table\/rows\/itemAt\(index=\d+\)$/, status: 404, code: 'ApiNotFound', innerCode: '', message: 'The API you are trying to use could not be found. It may be available in a newer version of Excel.' });
+  let err;
+  try { await wb.deleteTransaction(ref); } catch (e) { err = e; }
+  assert.ok(err instanceof ExcelApiError, String(err));
+  assert.equal(err.status, 404);
+  assert.equal(err.code, 'ApiNotFound');
+  assert.match(err.message, /could not be found/, 'the service\'s own wording reaches the member and the log');
+  assert.equal(mock.log.filter(e => e.method === 'DELETE').length, 1, 'sent once; a refused write is never retried by the app');
+  assert.ok(mock.table('LOG_Table').rows.some(r => r[0] === 13), 'the transaction is intact');
+  assert.equal(wb.halted, null, 'a clean refusal is not an incident: nothing ambiguous happened');
+  const i = mock.log.findIndex(e => e.method === 'DELETE');
+  assert.ok(mock.log[i - 1].method === 'GET' && /LOG_Table\/dataBodyRange/.test(mock.log[i - 1].url), 'the fresh identity check still precedes the DELETE');
+  const again = await wb.load();
+  assert.equal(again.transactions.length, snap.transactions.length, 'and the ledger reloads unchanged');
+  assert.equal(wb.halted, null);
+});
+
+test('live 2026-09-20 replayed: the connection test stops at the delete step, reports it, and says the test row is still there', async () => {
+  const { mock, wb } = setup();
+  await wb.load();
+  mock.failNext({ method: 'DELETE', match: /LOG_Table\/rows\/itemAt\(index=\d+\)$/, status: 404, code: 'ApiNotFound', innerCode: '', message: 'The API you are trying to use could not be found. It may be available in a newer version of Excel.' });
+  const report = await wb.selfTest({ confirmTestCopy: true });
+  assert.equal(report.ok, false);
+  assert.equal(report.restored, false, 'it must not claim the workbook was put back');
+  const failed = report.steps.find(s => !s.ok);
+  assert.equal(failed.name, 'Delete the test row');
+  assert.match(failed.detail, /could not be found/);
+  assert.ok(!report.steps.some(s => s.name === 'Confirm it is gone'), 'no step after the failure ran');
+  assert.equal(mock.table('LOG_Table').rows.filter(r => r[6] === 'TPAHA Books connection test').length, 1, 'the test row remains, exactly once, for a targeted cleanup');
+  assert.equal(mock.log.filter(e => e.method === 'DELETE').length, 1, 'one DELETE; nothing retried');
 });

@@ -9,6 +9,67 @@ or in the repository; nothing has connected to Microsoft 365; no production work
 
 ---
 
+## 2026-09-20 (third) — **First live write test: the DELETE was refused.** Cause found, fix made, mock corrected. **For review; not published; no workbook change**
+
+### What happened
+The connection test (runbook Part 2 step 4) was run on the test copy. Sign-in, picker, all six read-only
+checks, the add of the test row, its read-back and the sorted-table check passed. **The delete was refused:
+404 `ApiNotFound` — "The API you are trying to use could not be found. It may be available in a newer version
+of Excel."** The app sent the DELETE once, retried nothing, paused nothing, and reported that the row was still
+present — which is the designed behaviour for a clean refusal, and it held. The test row remains as
+**transaction #30**. Its add also rebuilt `LOG_Sorted` and set December's report rows.
+
+The request log from Diagnostics (**Copy log**) has not reached me; the account above is the reviewer's. It
+should be attached to the review of this fix.
+
+### Cause
+The app sent `DELETE …/tables/LOG_Table/rows/{index}` — exactly the form the reference page for "TableRow:
+delete" documents. The live service does not accept it. The evidence (mapping §3, with links):
+- `workbookTableRow` has **no `id`** — only `index` and `values`. `rows/{index}` is an entity-key lookup, and
+  the SDK snippets on the delete page itself key on a row *id* the resource does not have.
+- The collection's documented positional accessor is `rows/itemAt(index=N)`.
+- Microsoft Q&A carries the same `ApiNotFound` refusal for both DELETE and PATCH on `rows/{index}`, with
+  `ItemAt(index=…)` as the working form.
+- In the **same live run**, the app's `PATCH …/rows/itemAt(index=N)/range` succeeded.
+
+**Why the mock never objected:** it accepted both `rows/N` and `rows/itemAt(index=N)`. The tests proved the
+app's logic, not the service's routing — which the status file has said all along, and this is what that
+caveat looks like when it bites.
+
+### The fix (`site/js/workbook/excel-client.js`, `site/js/workbook/mock-excel.js`)
+- One `rowPath(table, index)` → `rows/itemAt(index=N)`; `deleteRowPath` and `rowRangePath` both derive from
+  it, so a row is addressed one way everywhere.
+- **Unchanged, deliberately:** the fresh read evaluated before the DELETE, the identity-and-content check at
+  that index, the exactly-once send, and the read-back that decides an uncertain answer. A 4xx refusal is
+  `failed` (thrown, nothing retried, no incident); a lost answer is `ambiguous` (resolved by reading).
+- **The mock now refuses `rows/N`** with the service's own 404 `ApiNotFound`, for DELETE, GET and PATCH. It
+  also gained a `method` filter on injected failures, so a replay can target the DELETE and not the
+  number-format PATCH that shares the path.
+
+### Tests — 156 unit (was 152), 189 browser, 21 config, all passing
+- Three tests that hard-coded `rows/N` were corrected to the working form; the R5 failure-injection regex too.
+- **New:** `rows/N` is refused for every method and changes nothing; every DELETE the app sends — a delete, a
+  correction's cleanup, a helper-table shrink — uses `itemAt` and never `rows/N`; the live refusal replayed
+  against a delete (one DELETE, intact row, no incident, the fresh check still first, clean reload); and the
+  live refusal replayed against the connection test itself (stops at "Delete the test row", `restored: false`,
+  no later step runs, the test row remains exactly once).
+- Honest limit: **the mock now encodes the evidenced form; it does not prove Microsoft accepts
+  `DELETE …/rows/itemAt(index=N)`.** The documentation lists no DELETE form for `itemAt`. The targeted cleanup
+  below is the proof, one row at a time.
+
+### Targeted cleanup of #30 — runbook Part 2a, not yet authorised
+Read-only first (website: exactly one test row, #30, no bands, count 26; Excel: #30 last in LOG, December row
+4 showing it). Then **one** checked delete of #30 from the website, which also rebuilds `LOG_Sorted` and
+re-hides December. Then verify read-only (25 on the website and in Diagnostics; #30 gone from both tables in
+Excel; December as before). If the delete is refused again, stop and send the log — the fallback is the
+workbook's own Run DeleteTransaction with 30 in the ENTRY form, pressed only on the reviewer's word. The
+connection test must **not** be used for cleanup: it adds a new row and deletes that one. Only after #30 is
+gone may the connection test be re-run, on a separate go-ahead.
+
+Not published. The workbook has not been touched since the refused delete.
+
+---
+
 ## 2026-09-20 (later) — **Published.** Part 0 run in full; every verification passed. **No workbook write**
 
 Cody authorised publishing. Runbook Part 0 was followed step by step:
