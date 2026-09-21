@@ -9,6 +9,28 @@ or in the repository; nothing has connected to Microsoft 365; no production work
 
 ---
 
+## 2026-09-20 (fifth) — **Published: `6c51573`, the delete-path fix.** Part 0 run in full; every verification passed. **No workbook write**
+
+Cody authorised publishing the reviewed fix. Runbook Part 0, step by step:
+
+| Step | Result |
+|---|---|
+| 0.1 tree and suites | `git status` empty; `npm test` 158/0; Playwright 189 passed; `verify:config` 21/0 |
+| 0.2 contents | 3 commits `537de2c`, `477b613`, `6c51573`; 9 files: client, mock, diagnostics, tests, docs. Private-file check printed nothing. After-hashes re-derived at HEAD matched the runbook table |
+| 0.3 push | `e5a913a..6c51573  main -> main` |
+| 0.4 deployment | polled the served `excel-client.js`: it changed from the old build (`b714d4f9…aaea`) to the approved hash **about ten seconds after the push** |
+| 0.5 served files | `excel-client.js` 200 `332ab50d…4328` ✓ · `mock-excel.js` 200 `f1f11630…b3e3` ✓ · `diagnostics.js` 200 `411fc9f1…6361` ✓ — each equal to its committed blob · `config.js` 200 `bc25ac6c…ce48` ✓ unchanged · the served client contains `rows/$/itemAt(index=…)` literally · `ledger.html` 200 |
+| 0.6 | Nobody signed in |
+
+**Deployed commit: `6c51573`.** The live site now sends `DELETE …/rows/$/itemAt(index=n)`, Microsoft's published
+form, and logs a refusal's error code, inner code and message.
+
+The connection test has **not** been re-run and the workbook has **not** been touched: test transaction #30 is
+still present. Next is the targeted cleanup of #30 — runbook Part 2a — on Cody's go, one row, one write, with
+the reviewer walking through it.
+
+---
+
 ## 2026-09-20 (fourth) — Correction to the entry below, from the actual request log. **For review; not published; no workbook change**
 
 The reviewer supplied the request log of the failed run. It reads: `DELETE /workbook/tables/LOG_Table/rows/26 →

@@ -10,7 +10,13 @@ to the developer.
 
 ---
 
-## Part 0. Publish the reviewed code — **run on 2026-09-20 for `e5a913a`; to be run again for the delete-path fix**
+## Part 0. Publish the reviewed code — **run twice on 2026-09-20: `e5a913a`, then `6c51573` (the delete-path fix)**
+
+Second run, `6c51573`: 0.1 clean tree, 158 / 189 / 21 passing. 0.2 three commits, nine files, private-file check
+empty. 0.3 pushed `e5a913a..6c51573`. 0.4 the served `excel-client.js` changed to the approved hash within about
+ten seconds. 0.5 `excel-client.js`, `mock-excel.js`, `diagnostics.js` each hash to their committed blob;
+`config.js` unchanged; the served client contains `rows/$/itemAt(index=…)` literally; ledger page 200. Nobody
+signed in; no workbook write.
 
 Result: `e5a913a` deployed. 0.1 clean tree, 152 / 189 / 21 passing. 0.2 eight commits, 15 files, private-file
 check empty. 0.3 pushed `6e19eb0..e5a913a`. 0.4 the new file answered 200 within about ten seconds. 0.5 every
@@ -59,7 +65,7 @@ once. The check has to use a file this release actually changes. Two do the job,
 |---|---|---|
 | `js/save/report-formatting.js` *(release `e5a913a`, verified 2026-09-20)* | **404** — the file does not exist on the live site | 200, SHA-256 `49C85F6F0699EB1B2B60CBE8BEBEEE785BE008DA25AE38FE23C2E80AF8402CF0` |
 | `js/workbook/ledger-workbook.js` *(release `e5a913a`, verified 2026-09-20)* | 200, SHA-256 `20CD704CB1F59E1CFDFE31930A05EE9A1709AA3E46189F483BC8FF344F4EB7EA` | 200, SHA-256 `2CDDFCA75FDF5C804C6924B6DE5644E2DFF73A00FFE4A8067C4E6A771B69261A` |
-| `js/workbook/excel-client.js` *(the delete-path fix, **not yet published**)* | 200, SHA-256 `B714D4F9F1A3E7A5BB5AABE4423F8E47258C295505F44E80E67CCCFF1712AAEA` — the build that sends `rows/{index}` | 200, SHA-256 `332AB50D2386106D178CE9DC7F8F28D8568F90941D76A29FE6A3F010ABAC4328` — the build that sends `rows/$/itemAt(index=n)` |
+| `js/workbook/excel-client.js` *(release `6c51573`, verified 2026-09-20)* | 200, SHA-256 `B714D4F9F1A3E7A5BB5AABE4423F8E47258C295505F44E80E67CCCFF1712AAEA` — the build that sends `rows/{index}` | 200, SHA-256 `332AB50D2386106D178CE9DC7F8F28D8568F90941D76A29FE6A3F010ABAC4328` — the build that sends `rows/$/itemAt(index=n)` |
 
 The first is a new file, so its mere presence proves the new code is live. The second must **change**, which
 proves the old build was replaced rather than a stale copy being served from cache. Both before-values were
