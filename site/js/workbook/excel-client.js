@@ -132,10 +132,12 @@ export class ExcelClient {
       throw new ExcelApiError({ message: `Network problem while contacting Microsoft 365 (${e.message}).`, status: 0, ambiguous: !opts.idempotent, method, path });
     }
     const requestId = res.headers.get('request-id');
-    this.logFn({ method, path, status: res.status, ms: Date.now() - started, requestId });
-    if (res.ok) return readJson(res);
+    if (res.ok) { this.logFn({ method, path, status: res.status, ms: Date.now() - started, requestId }); return readJson(res); }
     const body = await readJson(res);
     const c = classifyError(res.status, body, res.headers);
+    // A refusal is logged with its code, inner code and message: the live log of 2026-09-20 had only the status,
+    // and the code had to be left unrecorded.
+    this.logFn({ method, path, status: res.status, ms: Date.now() - started, requestId, code: c.code, innerCode: c.innerCode, error: c.message });
     if (c.recreatable && opts.session) {
       this.sessionId = null;
       if (opts.idempotent && attempt === 0) { await this._openSessionUnqueued(); return this._send(method, path, opts, 1); }
@@ -203,18 +205,25 @@ export class ExcelClient {
   getTableBody(table) { return this.request('GET', this.tableBodyPath(table)); }
   addTableRows(table, values2D) { return this.request('POST', `/workbook/tables/${enc(table)}/rows/add`, { body: { values: values2D } }); }
   /**
-   * A table row is addressed by position through the collection's itemAt(index=N) function, never as
-   * rows/N. The reference for "TableRow: delete" shows rows/{index}, but workbookTableRow has no id property
-   * (only index and values), the SDK snippets on that same page key on a row *id*, and the live service
-   * answers rows/N with 404 ApiNotFound: "The API you are trying to use could not be found. It may be available
-   * in a newer version of Excel." This was met on the first live connection test (2026-09-20) and matches the
-   * Microsoft Q&A reports for both DELETE and PATCH on rows/{index}. The row range PATCH below already used
-   * itemAt and worked live in that same test. Evidence: docs/workbook-mapping.md §2.
+   * How a table row is addressed, and why the DELETE and the range PATCH spell it differently.
+   *
+   * The first live connection test (2026-09-20) sent DELETE …/rows/26 — the form the "TableRow: delete"
+   * reference page shows — and Microsoft answered **400**: "The API you are trying to use could not be found.
+   * It may be available in a newer version of Excel." The request log records status and message; it did not
+   * record the error code, so none is claimed here. workbookTableRow has no id property, only index and
+   * values, so rows/N asks for a row by a key the resource does not have.
+   *
+   * The DELETE reproduces Microsoft's own worked example in "Working with Excel in Microsoft Graph", the one
+   * published DELETE-by-position form, `$` segment included:
+   *     DELETE …/workbook/tables('4')/rows/$/itemAt(index=6)   →   204 No Content
+   * The range PATCH keeps the "TableRow: Range" reference form, rows/itemAt(index=N)/range, which succeeded in
+   * that same live run (PATCH …/rows/itemAt(index=26)/range → 200). Whether the service accepts the DELETE
+   * form is still to be shown live — docs/checkpoint-2-runbook.md Part 2a, one row. Evidence and links:
+   * docs/workbook-mapping.md §3.
    */
-  rowPath(table, index) { return `/workbook/tables/${enc(table)}/rows/itemAt(index=${Number(index)})`; }
-  deleteRowPath(table, index) { return this.rowPath(table, index); }
+  deleteRowPath(table, index) { return `/workbook/tables/${enc(table)}/rows/$/itemAt(index=${Number(index)})`; }
   deleteTableRow(table, index) { return this.request('DELETE', this.deleteRowPath(table, index)); }
-  rowRangePath(table, index) { return `${this.rowPath(table, index)}/range`; }
+  rowRangePath(table, index) { return `/workbook/tables/${enc(table)}/rows/itemAt(index=${Number(index)})/range`; }
   getTableRowRange(table, index) { return this.request('GET', this.rowRangePath(table, index)); }
   patchTableRowRange(table, index, props) { return this.request('PATCH', this.rowRangePath(table, index), { body: props }); }
   calculate(type = 'Full') { return this.request('POST', '/workbook/application/calculate', { body: { calculationType: type } }); }

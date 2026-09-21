@@ -54,7 +54,7 @@ at a time from one page, and every write is followed by a read-back before the a
 Reads may be retried once (network loss, 429/503/504 with `Retry-After`, expired session). **Writes are
 sent exactly once**; when the answer to a write is lost the operation is reported as uncertain and is
 resolved by reading (§3b), never by sending it again automatically. **Every positional request (a
-DELETE of `rows/itemAt(index=n)`, a PATCH of `rows/itemAt(index=n)/range`) is preceded by a fresh read that is evaluated
+DELETE of `rows/$/itemAt(index=n)`, a PATCH of `rows/itemAt(index=n)/range`) is preceded by a fresh read that is evaluated
 before the request is sent**: the row at that index must be exactly the intended row (identity and
 content), otherwise the app re-reads and re-aims, or stops. No `$batch` is used by the adapter
 (the client still implements it; the earlier read+delete batch was withdrawn after the re-review because
@@ -75,26 +75,35 @@ only a Save calls *complete* (or writes the operation if nothing landed).
 
 **How a table row is addressed — corrected after the first live write test (2026-09-20).** The reference page
 for [TableRow: delete](https://learn.microsoft.com/en-us/graph/api/tablerow-delete?view=graph-rest-1.0) shows
-`DELETE …/tables/{id|name}/rows/{index}`, and that is what this app sent. The live service answered
-**404 `ApiNotFound`: "The API you are trying to use could not be found. It may be available in a newer version
-of Excel."** The connection test stopped at its delete step and its test row stayed in the workbook. Four
-pieces of evidence point the same way, and the fix follows them:
+`DELETE …/tables/{id|name}/rows/{index}`, and that is what this app sent: `DELETE /workbook/tables/LOG_Table/rows/26`.
+The live service answered **400** with the message *"The API you are trying to use could not be found. It may
+be available in a newer version of Excel. Please refer to the documentation: …"*. The request log records the
+status and the message; **it did not record an error code, and none is claimed here.** The connection test
+stopped at its delete step and its test row stayed in the workbook as #30. (An earlier draft of this section
+wrote "404 ApiNotFound", taken from other people's reports rather than from this log; corrected 2026-09-20.)
 
 | Evidence | What it shows |
 |---|---|
-| [workbookTableRow resource](https://learn.microsoft.com/en-us/graph/api/resources/workbooktablerow?view=graph-rest-1.0) | The row has **two properties, `index` and `values`, and no `id`**. The `{index}` segment in `rows/{index}` is an entity-key lookup, and the SDK snippets on the delete page itself key on a *row id* (`Rows["{workbookTableRow-id}"]`) — a key the resource does not have |
-| [TableRowCollection: ItemAt](https://learn.microsoft.com/en-us/graph/api/tablerowcollection-itemat?view=graph-rest-1.0) | The collection's documented positional accessor is `rows/itemAt(index={index})`, zero-based |
-| Microsoft Q&A: [DELETE rows/{index} → "could not be found"](https://learn.microsoft.com/en-us/answers/questions/2149984/i-am-using-this-graph-api-delete-https-graph-micro) and [PATCH rows/{index} → ApiNotFound](https://learn.microsoft.com/en-us/answers/questions/1680085/error-apinotfound-trying-standard-update-workbook) | The same refusal, reported by others for both methods; the second thread's working form addresses the row through `ItemAt(index=…)` |
-| This app's own live test | `PATCH …/rows/itemAt(index=n)/range` (the number-format touch after the add) **succeeded** in the same run in which `DELETE …/rows/{index}` was refused |
+| The live request log, 2026-09-20 | `DELETE /workbook/tables/LOG_Table/rows/26 → 400`, message above. In the same run, `PATCH /workbook/tables/LOG_Table/rows/itemAt(index=26)/range → 200` |
+| [workbookTableRow resource](https://learn.microsoft.com/en-us/graph/api/resources/workbooktablerow?view=graph-rest-1.0) | The row has **two properties, `index` and `values`, and no `id`**. `rows/{index}` asks for a row by a key the resource does not have; the SDK snippets on the delete page itself key on a *row id* (`Rows["{workbookTableRow-id}"]`) |
+| [Working with Excel in Microsoft Graph](https://learn.microsoft.com/en-us/graph/api/resources/excel?view=graph-rest-1.0), "Delete table row" | **Microsoft's own worked example**, the one published DELETE-by-position form: `DELETE …/workbook/tables('4')/rows/$/itemAt(index=6)` → `204 No Content`. The rows listed on that same page carry `@odata.id`s of the form `…/rows/itemAt(0)` |
+| [TableRowCollection: ItemAt](https://learn.microsoft.com/en-us/graph/api/tablerowcollection-itemat?view=graph-rest-1.0) and [TableRow: Range](https://learn.microsoft.com/en-us/graph/api/tablerow-range?view=graph-rest-1.0) | The reference form for reading a row by position and for its range: `rows/itemAt(index={index})` and `rows/itemAt(index={index})/range` |
+| Microsoft Q&A: [DELETE rows/{index}](https://learn.microsoft.com/en-us/answers/questions/2149984/i-am-using-this-graph-api-delete-https-graph-micro) and [PATCH rows/{index}](https://learn.microsoft.com/en-us/answers/questions/1680085/error-apinotfound-trying-standard-update-workbook) | Others met the same message for both methods (their reports show the code `ApiNotFound`; ours did not record a code). The second thread's working form is `rows/$/ItemAt(index=…)` |
 
-The fix: every row is addressed as `rows/itemAt(index=n)`, for DELETE as it already was for the range PATCH.
-Nothing else about the delete changed — the fresh read evaluated before sending, the identity-and-content
-check, the exactly-once send, and the read-back that decides an uncertain answer are as they were. The mock
-now **refuses** `rows/N` with the service's own 404 `ApiNotFound` for every method, so no test can pass on
-that path again; it had accepted it, which is how the app reached the live test with it. **Whether the service
-accepts `DELETE …/rows/itemAt(index=n)` is still to be shown live**: the documentation does not list a DELETE
-form for it, the evidence above is the strongest available, and the targeted cleanup of the leftover test row
-in `docs/checkpoint-2-runbook.md` Part 2a is the proof, one row at a time.
+**The fix follows the documents, one form per operation.** The DELETE reproduces Microsoft's worked example
+exactly, `$` segment included: `DELETE …/rows/$/itemAt(index=n)`, expecting 204. The range PATCH keeps the
+reference form that succeeded live: `PATCH …/rows/itemAt(index=n)/range`. Nothing else about the delete
+changed — the fresh read evaluated before sending, the identity-and-content check at that index, the
+exactly-once send, and the read-back that decides an uncertain answer are as they were; a 4xx is a clean
+refusal, thrown and never retried.
+
+**The mock** now refuses `rows/N` for every method with 400 and the logged message (its error code left blank
+rather than guessed), deletes only through the published `rows/$/itemAt(index=n)` form, answering 204, and
+refuses `DELETE rows/itemAt(index=n)` with a refusal labelled as the mock's own, so the app cannot drift onto a
+spelling no document shows. It had accepted `rows/N`, which is how the app reached the live test with it.
+**Whether the service accepts the DELETE form is still to be shown live** — the targeted cleanup of #30 in
+`docs/checkpoint-2-runbook.md` Part 2a is that proof, one row. The request log now records a refusal's error
+code and inner code as well as its status, so the next one is recorded rather than reconstructed.
 
 | Website action | Graph operations (in order) | Verification |
 |---|---|---|
@@ -102,10 +111,10 @@ in `docs/checkpoint-2-runbook.md` Part 2a is the proof, one row at a time.
 | Search transactions | none (filters the loaded rows) | Refresh re-reads the table. |
 | Add transaction (Submit Entry) | …then §8 report row visibility for the month of the new date. 1 `GET LOG_Table/dataBodyRange`: next number, and "is there already a row with my operation id?" (same content → the earlier attempt landed, finish it; different content → collision, refuse; more than one → incident); 2 `POST LOG_Table/rows/add` with `[[maxId+1, operationId, dateSerial, type, category, amount, description, chequeNum, notes]]`; 3 `GET LOG_Table/dataBodyRange` and find the row by operation id; 4 `PATCH LOG_Table/rows/itemAt(index=n)/range` numberFormat for Date and Amount, single attempt, a failure becomes a warning (values are saved); 5 uniqueness of the number (§3b); 6 rebuild LOG_Sorted | The row with the operation id exists exactly once, its content equals what was sent, its number is unique. |
 | Check workbook (after an uncertain add, or automatically after a reload) — **read-only** | `GET LOG_Table/dataBodyRange`; if the row is there: `GET LOG_Table/rows/itemAt(index=n)/range` (number formats) and `GET LOG_Sorted_Table/dataBodyRange` | Outcome `missing` (Save will send it), `landed` (everything confirmed → Saved), `incomplete` (the row is there but formats / number / sorted table are not confirmed → "Not finished", Save finishes them) or `conflict` (another entry carries the id). Zero writes, proven by tests that count requests. |
-| Correct transaction | …then §8 report row visibility for **both** the old and the new month. 1 `GET LOG_Table/dataBodyRange`; locate by identity, compare fingerprint with the loaded copy → mismatch or absent = "Someone else changed this record", nothing written; 2 `POST LOG_Table/rows/add` with the corrected copy (**same TransactionID and Timestamp**); 3 `GET` and verify exactly one corrected copy exists (else incident); 4 numberFormat touch; 5 checked delete of the old copy: `GET LOG_Table/dataBodyRange`, evaluate that the old copy still sits at its index (else re-read and re-aim, up to three times), then `DELETE LOG_Table/rows/itemAt(index=n)`; 6 `GET` and assess by identity (§3b); 7 rebuild LOG_Sorted | Read-back shows one copy with the new fingerprint and none with the old. The corrected row is now the last row of the table (the month sheets sort by date, so their output is unchanged). |
+| Correct transaction | …then §8 report row visibility for **both** the old and the new month. 1 `GET LOG_Table/dataBodyRange`; locate by identity, compare fingerprint with the loaded copy → mismatch or absent = "Someone else changed this record", nothing written; 2 `POST LOG_Table/rows/add` with the corrected copy (**same TransactionID and Timestamp**); 3 `GET` and verify exactly one corrected copy exists (else incident); 4 numberFormat touch; 5 checked delete of the old copy: `GET LOG_Table/dataBodyRange`, evaluate that the old copy still sits at its index (else re-read and re-aim, up to three times), then `DELETE LOG_Table/rows/$/itemAt(index=n)`; 6 `GET` and assess by identity (§3b); 7 rebuild LOG_Sorted | Read-back shows one copy with the new fingerprint and none with the old. The corrected row is now the last row of the table (the month sheets sort by date, so their output is unchanged). |
 | Check workbook (after an uncertain correction) — **read-only** | `GET LOG_Table/dataBodyRange` (+ formats and sorted-table reads when the corrected copy exists) | `missing` / `landed` / `incomplete` (e.g. "removal of the old copy" still to do; Save finishes it) / `conflict` (record gone or changed by someone else). Whenever a correction completes, the page's stored record for that dialog takes the **corrected row** as its reference, together with any newer text typed meanwhile, so a later Save (or a save after a reload) is compared against the version that actually reached the workbook and not against the one from before (review finding U1). |
 | Delete transaction | …then §8 report row visibility for the month of the deleted date. 1 `GET LOG_Table/dataBodyRange`; locate + fingerprint check as above; 2 checked delete as in step 5 above; 3 `GET` and assess by identity (§3b); 4 rebuild LOG_Sorted | The fresh read shows exactly the target at the index before the DELETE is sent; afterwards exactly the target is gone. |
-| Rebuild LOG_Sorted (internal, after every change) | Up to three rounds of: 1 `GET LOG_Table/dataBodyRange` (fresh; non-blank rows sorted by Date, ties in table order); 2 `GET LOG_Sorted_Table/dataBodyRange`; 3 identical → done; else `PATCH worksheets('LOG_Sorted')/range(address=<overlap>)` values + numberFormat, `POST LOG_Sorted_Table/rows/add` for extra rows or `DELETE LOG_Sorted_Table/rows/itemAt(index=i)` for surplus rows (from the end). After the rounds, one more fresh comparison. | "Consistent" means the sorted table equals the **freshly re-read** LOG at the end. If still inconsistent the app shows "The monthly sheets may be out of date" and Diagnostics reports it; the next change or Refresh rebuilds again. |
+| Rebuild LOG_Sorted (internal, after every change) | Up to three rounds of: 1 `GET LOG_Table/dataBodyRange` (fresh; non-blank rows sorted by Date, ties in table order); 2 `GET LOG_Sorted_Table/dataBodyRange`; 3 identical → done; else `PATCH worksheets('LOG_Sorted')/range(address=<overlap>)` values + numberFormat, `POST LOG_Sorted_Table/rows/add` for extra rows or `DELETE LOG_Sorted_Table/rows/$/itemAt(index=i)` for surplus rows (from the end). After the rounds, one more fresh comparison. | "Consistent" means the sorted table equals the **freshly re-read** LOG at the end. If still inconsistent the app shows "The monthly sheets may be out of date" and Diagnostics reports it; the next change or Refresh rebuilds again. |
 | Month view | `GET …/worksheets('<Month>')/range(address='A2:O40')` | Displayed as the workbook computes it; the app computes the same figures from the loaded rows and flags any difference. |
 | Annual view | `GET …/worksheets('Annual 2026')/range(address='A3:N19')` | Displayed as the workbook computes it; total income, total expenses, net, opening and closing balance are compared with the app's own calculation and any difference is shown. |
 | Change prior-year balance | 1 `GET ENTRY!B23`; compare with the value loaded → mismatch = conflict; 2 `PATCH worksheets('ENTRY')/range(address='B23')` values; 3 read-back | Value equals what was sent. Sheet protection permits it: B23 is an unlocked cell. |
@@ -130,7 +139,7 @@ time, no conditional writes, no transactions):
   just-added row** to the next free number after a fresh read evaluated first (our row must still sit at
   that index), then verifies. At most three rounds; then an incident (`duplicate-number`). If a
   pre-existing row received the number instead, an incident (`wrong-row-renumbered`) names it.
-- **Deletes and renumbering are positional**: `rows/itemAt(index=n)` acts on whatever row is at that index when
+- **Deletes and renumbering are positional**: `rows/$/itemAt(index=n)` (the delete) acts on whatever row is at that index when
   the request runs. The evaluated read removes every shift that happens before it; it cannot remove a
   shift that happens after it.
 

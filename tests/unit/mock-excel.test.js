@@ -57,25 +57,25 @@ test('rows/add appends without inheriting number formats and returns the new ind
   assert.equal(rowRange.text[0][2], '2026-09-06');
 });
 
-test('deleting a row through itemAt(index=N) shifts later rows up and shrinks the table', async () => {
+test('deleting a row through the published form rows/$/itemAt(index=N) answers 204, shifts later rows up and shrinks the table', async () => {
   const mock = new MockWorkbook(fixture);
   const before = await json(await call(mock, 'GET', '/workbook/tables/LOG_Table/dataBodyRange'));
   const thirdId = before.values[3][0];
-  const res = await call(mock, 'DELETE', '/workbook/tables/LOG_Table/rows/itemAt(index=2)');
-  assert.equal(res.status, 200);
+  const res = await call(mock, 'DELETE', '/workbook/tables/LOG_Table/rows/$/itemAt(index=2)');
+  assert.equal(res.status, 204, 'as in Microsoft\'s worked example');
   const after = await json(await call(mock, 'GET', '/workbook/tables/LOG_Table/dataBodyRange'));
   assert.equal(after.rowCount, 12);
   assert.equal(after.values[2][0], thirdId);
-  const alt = await call(mock, 'DELETE', '/workbook/tables/LOG_Table/rows/itemAt(index=0)');
-  assert.equal(alt.status, 200);
+  const alt = await call(mock, 'DELETE', '/workbook/tables/LOG_Table/rows/$/itemAt(index=0)');
+  assert.equal(alt.status, 204);
   assert.equal((await json(await call(mock, 'GET', '/workbook/tables/LOG_Table/dataBodyRange'))).rowCount, 11);
 });
 
-// The reference page for "TableRow: delete" shows rows/{index}. The live service answered it with 404 ApiNotFound
-// on the first connection test (2026-09-20), as the Microsoft Q&A reports for DELETE and PATCH on rows/{index}
-// say it does. The mock used to accept that path, which is how the app reached the live test with it. It now
-// refuses it exactly as the service does, for every method, so no test can pass on it again.
-test('rows/N is refused with 404 ApiNotFound for DELETE, GET and PATCH, as the live service refuses it', async () => {
+// The reference page for "TableRow: delete" shows rows/{index}. On 2026-09-20 the live service answered
+// DELETE …/rows/26 with 400 and "The API you are trying to use could not be found…" (request log: status and
+// message; the error code was not recorded, so nothing here asserts one). The mock used to accept that path,
+// which is how the app reached the live test with it. It now refuses it for every method.
+test('rows/N is refused with 400 and the message the live service gave, for DELETE, GET and PATCH', async () => {
   const mock = new MockWorkbook(fixture);
   for (const [method, path, body] of [
     ['DELETE', '/workbook/tables/LOG_Table/rows/2', undefined],
@@ -84,14 +84,23 @@ test('rows/N is refused with 404 ApiNotFound for DELETE, GET and PATCH, as the l
     ['GET', '/workbook/tables/LOG_Table/rows/2/range', undefined],
   ]) {
     const res = await call(mock, method, path, body);
-    assert.equal(res.status, 404, `${method} ${path}`);
+    assert.equal(res.status, 400, `${method} ${path}`);
     const err = (await json(res)).error;
-    assert.equal(err.code, 'ApiNotFound', `${method} ${path}`);
-    assert.match(err.message, /could not be found/);
+    assert.match(err.message, /^The API you are trying to use could not be found\. It may be available in a newer version of Excel\./, `${method} ${path}`);
   }
   assert.equal(mock.table('LOG_Table').rows.length, 13, 'nothing was deleted or changed by any of them');
   const ok = await call(mock, 'GET', '/workbook/tables/LOG_Table/rows/itemAt(index=2)');
-  assert.equal(ok.status, 200, 'the positional function is the only way to address a row');
+  assert.equal(ok.status, 200, 'the reference form still reads a row');
+});
+
+test('the mock deletes only through the published form: DELETE on the reference form rows/itemAt(index=N) is refused as not modelled', async () => {
+  const mock = new MockWorkbook(fixture);
+  const res = await call(mock, 'DELETE', '/workbook/tables/LOG_Table/rows/itemAt(index=2)');
+  assert.equal(res.status, 400);
+  assert.equal((await json(res)).error.code, 'MockNotModelled', 'a refusal of the mock\'s own, labelled as such, not a claim about the service');
+  assert.equal(mock.table('LOG_Table').rows.length, 13);
+  const range = await call(mock, 'PATCH', '/workbook/tables/LOG_Table/rows/itemAt(index=2)/range', { numberFormat: [[null, null, 'yyyy-mm-dd', null, null, null, null, null, null]] });
+  assert.equal(range.status, 200, 'the range PATCH on the reference form, which worked live, still works');
 });
 
 test('range PATCH writes plain cells, skips nulls, and refuses formula cells (protected sheets)', async () => {
@@ -160,8 +169,8 @@ test('$batch runs sub-requests in order, honours dependsOn failures with 424, an
   mock.beforeRespond = async e => { seen.push(e.method); };
   const res = await mock.fetch('https://graph.microsoft.com/v1.0/$batch', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ requests: [
     { id: '1', method: 'GET', url: '/drives/D1/items/I1/workbook/tables/LOG_Table/dataBodyRange' },
-    { id: '2', method: 'DELETE', url: '/drives/D1/items/I1/workbook/tables/LOG_Table/rows/itemAt(index=99)', dependsOn: ['1'] },
-    { id: '3', method: 'DELETE', url: '/drives/D1/items/I1/workbook/tables/LOG_Table/rows/itemAt(index=1)', dependsOn: ['2'] },
+    { id: '2', method: 'DELETE', url: '/drives/D1/items/I1/workbook/tables/LOG_Table/rows/$/itemAt(index=99)', dependsOn: ['1'] },
+    { id: '3', method: 'DELETE', url: '/drives/D1/items/I1/workbook/tables/LOG_Table/rows/$/itemAt(index=1)', dependsOn: ['2'] },
   ] }) });
   assert.equal(res.status, 200);
   const body = await res.json();

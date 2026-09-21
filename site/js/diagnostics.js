@@ -18,7 +18,7 @@ const state = { auth: null, mode: 'test', mock: null, client: null, wb: null, ch
 
 function logRequest(e) {
   state.requests.push(e);
-  const li = h('li', {}, e.event ? `session ${e.id}` : `${e.method} ${e.path} → ${e.status || 'network error'} (${e.ms} ms)${e.requestId ? ' request-id ' + e.requestId : ''}${e.error ? ' ' + e.error : ''}`);
+  const li = h('li', {}, e.event ? `session ${e.id}` : `${e.method} ${e.path} → ${e.status || 'network error'} (${e.ms} ms)${e.requestId ? ' request-id ' + e.requestId : ''}${e.code ? ' code ' + e.code : ''}${e.innerCode ? ' inner ' + e.innerCode : ''}${e.error ? ' — ' + e.error : ''}`);
   $('#request-log').append(li);
 }
 

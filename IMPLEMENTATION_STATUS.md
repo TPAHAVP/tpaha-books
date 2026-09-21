@@ -9,27 +9,65 @@ or in the repository; nothing has connected to Microsoft 365; no production work
 
 ---
 
+## 2026-09-20 (fourth) — Correction to the entry below, from the actual request log. **For review; not published; no workbook change**
+
+The reviewer supplied the request log of the failed run. It reads: `DELETE /workbook/tables/LOG_Table/rows/26 →
+400`, with the message "The API you are trying to use could not be found. It may be available in a newer
+version of Excel." **The status was 400, not 404, and the log recorded no error code.** The entry below, as
+first written, said "404 `ApiNotFound`" — a status and a code taken from Microsoft Q&A threads describing
+other people's failures, not from this log, which had not reached me. That was wrong to write down as fact and
+is corrected everywhere: the client comment, the mock, the tests, the mapping, the runbook and the entry below.
+
+**The DELETE form is reconciled with Microsoft's own example.** "Working with Excel in Microsoft Graph" — the
+official overview — deletes a table row as `DELETE …/tables('4')/rows/$/itemAt(index=6)`, answering 204 No
+Content. That is the one published DELETE-by-position form, so the app now reproduces it exactly, `$` segment
+included. The range PATCH keeps `rows/itemAt(index=n)/range`, the reference form that succeeded in the live
+run. The fresh identity-and-content check before the send, the exactly-once send and the read-back are
+unchanged.
+
+**The mock claims nothing it cannot know.** `rows/N` is refused with 400 and the logged message, code blank.
+Only `rows/$/itemAt(index=n)` deletes, answering 204 as the example does. `DELETE rows/itemAt(index=n)` — a
+form no document shows — is refused with a code that names the mock (`MockNotModelled`), so the app cannot
+drift onto it and no one mistakes that refusal for the service's. Whether the service accepts the published
+form is for the live cleanup of #30 to show.
+
+**So the next failure is recorded, not reconstructed:** the client now logs a refusal's error code, inner code
+and message alongside its status, and Diagnostics' Copy log shows them.
+
+### Tests — 158 unit (was 156), 189 browser, 21 config, all passing
+Changed: the replays assert 400 and the logged message, and no code; every DELETE the app sends must match the
+published form and no PATCH may leave the reference form; the mock's refusal of `rows/N` is asserted at 400
+with the message only. New: the reference-form DELETE is refused as not modelled while its range PATCH still
+works; a refused request is logged with status, code, inner code and message, and a success carries none.
+
+Not published. The workbook is untouched since the refused delete.
+
+---
+
 ## 2026-09-20 (third) — **First live write test: the DELETE was refused.** Cause found, fix made, mock corrected. **For review; not published; no workbook change**
 
 ### What happened
 The connection test (runbook Part 2 step 4) was run on the test copy. Sign-in, picker, all six read-only
-checks, the add of the test row, its read-back and the sorted-table check passed. **The delete was refused:
-404 `ApiNotFound` — "The API you are trying to use could not be found. It may be available in a newer version
-of Excel."** The app sent the DELETE once, retried nothing, paused nothing, and reported that the row was still
-present — which is the designed behaviour for a clean refusal, and it held. The test row remains as
-**transaction #30**. Its add also rebuilt `LOG_Sorted` and set December's report rows.
+checks, the add of the test row, its read-back and the sorted-table check passed. **The delete was refused
+with 400**: `DELETE /workbook/tables/LOG_Table/rows/26 → 400`, "The API you are trying to use could not be found.
+It may be available in a newer version of Excel." The log recorded the status and message and **no error code**.
+The app sent the DELETE once, retried nothing, paused nothing, and reported that the row was still present —
+the designed behaviour for a clean refusal, and it held. The test row remains as **transaction #30**. Its add
+also rebuilt `LOG_Sorted` and set December's report rows.
 
-The request log from Diagnostics (**Copy log**) has not reached me; the account above is the reviewer's. It
-should be attached to the review of this fix.
+*(Corrected 2026-09-20 from the request log. The first draft of this entry said "404 `ApiNotFound`", taken from
+other people's reports; see the correction entry above.)*
 
 ### Cause
 The app sent `DELETE …/tables/LOG_Table/rows/{index}` — exactly the form the reference page for "TableRow:
 delete" documents. The live service does not accept it. The evidence (mapping §3, with links):
-- `workbookTableRow` has **no `id`** — only `index` and `values`. `rows/{index}` is an entity-key lookup, and
-  the SDK snippets on the delete page itself key on a row *id* the resource does not have.
-- The collection's documented positional accessor is `rows/itemAt(index=N)`.
-- Microsoft Q&A carries the same `ApiNotFound` refusal for both DELETE and PATCH on `rows/{index}`, with
-  `ItemAt(index=…)` as the working form.
+- `workbookTableRow` has **no `id`** — only `index` and `values`. `rows/{index}` asks for a row by a key the
+  resource does not have; the SDK snippets on the delete page itself key on a row *id*.
+- **Microsoft's own worked example** in "Working with Excel in Microsoft Graph" deletes a row by position as
+  `DELETE …/tables('4')/rows/$/itemAt(index=6)` → 204 No Content — the one published DELETE-by-position form.
+- The reference form for reading a row and its range is `rows/itemAt(index=N)` / `…/range`.
+- Microsoft Q&A carries the same message for both DELETE and PATCH on `rows/{index}` (reported there with the
+  code `ApiNotFound`; our log recorded no code), with `rows/$/ItemAt(index=…)` as the working form.
 - In the **same live run**, the app's `PATCH …/rows/itemAt(index=N)/range` succeeded.
 
 **Why the mock never objected:** it accepted both `rows/N` and `rows/itemAt(index=N)`. The tests proved the
@@ -37,14 +75,19 @@ app's logic, not the service's routing — which the status file has said all al
 caveat looks like when it bites.
 
 ### The fix (`site/js/workbook/excel-client.js`, `site/js/workbook/mock-excel.js`)
-- One `rowPath(table, index)` → `rows/itemAt(index=N)`; `deleteRowPath` and `rowRangePath` both derive from
-  it, so a row is addressed one way everywhere.
+- One form per operation, each from its own document: the DELETE reproduces the worked example exactly,
+  `rows/$/itemAt(index=N)` (expecting 204); the range PATCH keeps the reference form that succeeded live,
+  `rows/itemAt(index=N)/range`.
 - **Unchanged, deliberately:** the fresh read evaluated before the DELETE, the identity-and-content check at
   that index, the exactly-once send, and the read-back that decides an uncertain answer. A 4xx refusal is
   `failed` (thrown, nothing retried, no incident); a lost answer is `ambiguous` (resolved by reading).
-- **The mock now refuses `rows/N`** with the service's own 404 `ApiNotFound`, for DELETE, GET and PATCH. It
-  also gained a `method` filter on injected failures, so a replay can target the DELETE and not the
-  number-format PATCH that shares the path.
+- **The mock now refuses `rows/N`** with 400 and the logged message, for DELETE, GET and PATCH, its error code
+  left blank rather than guessed. It deletes only through the published `rows/$/itemAt(index=N)` form
+  (answering 204) and refuses `DELETE rows/itemAt(index=N)` with a refusal labelled as the mock's own. It also
+  gained a `method` filter on injected failures, so a replay can target the DELETE and not the number-format
+  PATCH that shares the path.
+- **The request log now records a refusal's error code, inner code and message**, not only its status, so the
+  next live failure is recorded rather than reconstructed from other people's reports.
 
 ### Tests — 156 unit (was 152), 189 browser, 21 config, all passing
 - Three tests that hard-coded `rows/N` were corrected to the working form; the R5 failure-injection regex too.

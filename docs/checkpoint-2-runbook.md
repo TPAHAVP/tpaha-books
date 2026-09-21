@@ -59,7 +59,7 @@ once. The check has to use a file this release actually changes. Two do the job,
 |---|---|---|
 | `js/save/report-formatting.js` *(release `e5a913a`, verified 2026-09-20)* | **404** — the file does not exist on the live site | 200, SHA-256 `49C85F6F0699EB1B2B60CBE8BEBEEE785BE008DA25AE38FE23C2E80AF8402CF0` |
 | `js/workbook/ledger-workbook.js` *(release `e5a913a`, verified 2026-09-20)* | 200, SHA-256 `20CD704CB1F59E1CFDFE31930A05EE9A1709AA3E46189F483BC8FF344F4EB7EA` | 200, SHA-256 `2CDDFCA75FDF5C804C6924B6DE5644E2DFF73A00FFE4A8067C4E6A771B69261A` |
-| `js/workbook/excel-client.js` *(the delete-path fix, **not yet published**)* | 200, SHA-256 `B714D4F9F1A3E7A5BB5AABE4423F8E47258C295505F44E80E67CCCFF1712AAEA` — the build that sends `rows/{index}` | 200, SHA-256 `588702B86DA3A91D91C0E77E0E0CCFBDFF1E01E848CA8C44E02BB99AFA5AACC6` — the build that sends `rows/itemAt(index=n)` |
+| `js/workbook/excel-client.js` *(the delete-path fix, **not yet published**)* | 200, SHA-256 `B714D4F9F1A3E7A5BB5AABE4423F8E47258C295505F44E80E67CCCFF1712AAEA` — the build that sends `rows/{index}` | 200, SHA-256 `332AB50D2386106D178CE9DC7F8F28D8568F90941D76A29FE6A3F010ABAC4328` — the build that sends `rows/$/itemAt(index=n)` |
 
 The first is a new file, so its mere presence proves the new code is live. The second must **change**, which
 proves the old build was replaced rather than a stale copy being served from cache. Both before-values were
@@ -196,9 +196,11 @@ version and its time. That is the "before" marker.
 
 **Run on 2026-09-20, stopped at step 4's delete.** Sign-in, the workbook picker, the six read-only checks, the
 add of the test row, its read-back and the sorted-table check all passed. The **delete of the test row was
-refused by Microsoft: 404 `ApiNotFound`** on the path the reference page documents, `…/rows/{index}`. The app
-did what it is built to do on a refusal: sent it once, retried nothing, paused nothing, and reported that the
-row was still there. The test row remains in the workbook as **transaction #30** (`2026-12-31`, Deposit,
+refused by Microsoft with 400** — `DELETE /workbook/tables/LOG_Table/rows/26 → 400`, *"The API you are trying
+to use could not be found. It may be available in a newer version of Excel."* — on the path the reference page
+documents, `…/rows/{index}`. The log recorded the status and message, not an error code. The app did what it
+is built to do on a refusal: sent it once, retried nothing, paused nothing, and reported that the row was still
+there. The test row remains in the workbook as **transaction #30** (`2026-12-31`, Deposit,
 `0.01`, described *TPAHA Books connection test*). Its add also rebuilt `LOG_Sorted` and set December's report
 rows, so all three of those are now in a state the cleanup must undo. Mapping §3 has the evidence and the fix.
 
@@ -215,11 +217,11 @@ the test copy is quiet (prerequisite E), and Cody has said go. This is one write
    sheet: note which of rows 4 to 33 are hidden — row 4 will show the 0.01 deposit. **Close the workbook.**
 3. **The one write.** On the ledger page press Delete on #30 and confirm. The app reads the table fresh,
    checks that the row at that position is exactly #30 by number, timestamp and content, sends **one**
-   `DELETE …/rows/itemAt(index=n)`, reads back, rebuilds `LOG_Sorted`, and sets December's rows. Expect
-   "Deleted #30", a count of **25**, and no band.
+   `DELETE …/rows/$/itemAt(index=n)` — the form of Microsoft's own worked example, which answers 204 — reads
+   back, rebuilds `LOG_Sorted`, and sets December's rows. Expect "Deleted #30", a count of **25**, and no band.
    - **Refused again** (the message names *could not be found* or another 4xx): stop. Nothing was deleted.
-     Press **Copy log** and send it — this would mean the `itemAt` form is refused too, and the next step is
-     the reviewer's, not a retry. The fallback exists and is the workbook's own **Run DeleteTransaction** with
+     Press **Copy log** and send it — the log now carries the error code as well as the status — this would
+     mean the published form is refused too, and the next step is the reviewer's, not a retry. The fallback exists and is the workbook's own **Run DeleteTransaction** with
      30 in the ENTRY form, which rewrites both tables and refreshes the month rows; press it **only when the
      reviewer says so**.
    - **Uncertain** (the answer was lost, a 5xx): the app reads back and decides. If it reports the row gone,

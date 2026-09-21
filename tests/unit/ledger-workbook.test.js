@@ -370,7 +370,7 @@ test('R5: a lost response on the cleanup DELETE is verified by reading; a delete
   const { mock, wb } = setup();
   const snap = await wb.load();
   const ref = snap.transactions.find(t => t.id === 2);
-  mock.failNext({ match: /LOG_Table\/rows\/itemAt\(index=\d+\)$/, networkError: true, afterApply: true });
+  mock.failNext({ match: /LOG_Table\/rows\/\$\/itemAt\(index=\d+\)$/, networkError: true, afterApply: true });
   const t2 = await wb.updateTransaction(ref, { amount: 90 });
   assert.equal(t2.amount, 90);
   assert.equal(mock.table('LOG_Table').rows.filter(r => r[0] === 2).length, 1, 'the delete had applied; the read proved it');
@@ -379,7 +379,7 @@ test('R5: a lost response on the cleanup DELETE is verified by reading; a delete
   // A DELETE that fails BEFORE applying: the old copy remains -> duplicate copy, paused, explicit repair, verified resolution.
   const snap2 = await wb.load();
   const ref3 = snap2.transactions.find(t => t.id === 3);
-  mock.failNext({ match: /LOG_Table\/rows\/itemAt\(index=\d+\)$/, networkError: true });
+  mock.failNext({ match: /LOG_Table\/rows\/\$\/itemAt\(index=\d+\)$/, networkError: true });
   let err;
   try { await wb.updateTransaction(ref3, { amount: 46 }); } catch (e) { err = e; }
   assert.ok(err instanceof UnresolvedOperationError && err.kind === 'duplicate-copy', String(err));
@@ -1077,14 +1077,17 @@ test('empty ledger: the workbook\'s own scripts accept what this app leaves behi
 
 
 // ------------------------------------------------------------------ the first live connection test (2026-09-20)
-// The DELETE of the test row was refused by the real service: 404 ApiNotFound on LOG_Table/rows/{index}, the path
-// the reference page shows. The mock had accepted that path, so nothing here had ever objected. These pin the
-// corrected path and replay the refusal.
+// The DELETE of the test row was refused by the real service: DELETE LOG_Table/rows/26 → 400, "The API you are
+// trying to use could not be found…" (the request log recorded status and message, not the error code). rows/N is
+// the path the reference page shows; the mock had accepted it, so nothing here had ever objected. These pin the
+// corrected addressing — Microsoft's published DELETE example, rows/$/itemAt(index=N), for the delete; the
+// reference form rows/itemAt(index=N)/range, proven live, for the range PATCH — and replay the refusal.
 const ROW_BY_INDEX = /\/rows\/\d+(\/|$)/;
-const ROW_BY_ITEM_AT = /\/rows\/itemAt\(index=\d+\)(\/|$)/;
+const DELETE_FORM = /\/rows\/\$\/itemAt\(index=\d+\)$/;
+const RANGE_FORM = /\/rows\/itemAt\(index=\d+\)\/range$/;
 const deleteUrls = mock => mock.log.filter(e => e.method === 'DELETE').map(e => e.url);
 
-test('live 2026-09-20: every DELETE this app sends addresses the row through itemAt(index=N), never rows/N', async () => {
+test('live 2026-09-20: every DELETE this app sends uses the published form rows/$/itemAt(index=N), never rows/N; the range PATCH keeps the reference form', async () => {
   const { mock, wb } = setup();
   await wb.load();
   await wb.deleteTransaction((await wb.load()).transactions.find(t => t.id === 13));                // a delete
@@ -1094,22 +1097,21 @@ test('live 2026-09-20: every DELETE this app sends addresses the row through ite
   await wb.rebuildSorted();                                                                          // the rebuild's delete
   const urls = deleteUrls(mock);
   assert.ok(urls.length >= 3, `expected a delete, a correction cleanup and a helper-table shrink; got ${urls.length}`);
-  assert.deepEqual(urls.filter(u => ROW_BY_INDEX.test(u)), [], 'no DELETE uses the rows/N form the service refuses');
-  assert.ok(urls.every(u => ROW_BY_ITEM_AT.test(u)), `every DELETE uses itemAt: ${urls.join(' ')}`);
-  assert.ok(mock.log.some(e => e.method === 'PATCH' && ROW_BY_ITEM_AT.test(e.url)), 'and the row-range PATCH, which worked live, uses the same addressing');
+  assert.deepEqual(urls.filter(u => ROW_BY_INDEX.test(u)), [], 'no DELETE uses the rows/N form the service refused');
+  assert.ok(urls.every(u => DELETE_FORM.test(u)), `every DELETE reproduces the published example: ${urls.join(' ')}`);
+  assert.ok(mock.log.some(e => e.method === 'PATCH' && RANGE_FORM.test(e.url)), 'and the row-range PATCH keeps the reference form that worked live');
 });
 
-test('live 2026-09-20 replayed: a DELETE the service refuses with 404 ApiNotFound deletes nothing, is not retried, pauses nothing, and surfaces as the error it was', async () => {
+test('live 2026-09-20 replayed: a DELETE the service refuses with 400 deletes nothing, is not retried, pauses nothing, and surfaces with the service\'s own message', async () => {
   const { mock, wb } = setup();
   const snap = await wb.load();
   const ref = snap.transactions.find(t => t.id === 13);
-  mock.failNext({ method: 'DELETE', match: /LOG_Table\/rows\/itemAt\(index=\d+\)$/, status: 404, code: 'ApiNotFound', innerCode: '', message: 'The API you are trying to use could not be found. It may be available in a newer version of Excel.' });
+  mock.failNext({ method: 'DELETE', match: /LOG_Table\/rows\/\$\/itemAt\(index=\d+\)$/, status: 400, code: '', innerCode: '', message: "The API you are trying to use could not be found. It may be available in a newer version of Excel. Please refer to the documentation: \"https://docs.microsoft.com/office/dev/add-ins/reference/requirement-sets/excel-api-requirement-sets\"." });   // as logged live: status and message; no code was recorded
   let err;
   try { await wb.deleteTransaction(ref); } catch (e) { err = e; }
   assert.ok(err instanceof ExcelApiError, String(err));
-  assert.equal(err.status, 404);
-  assert.equal(err.code, 'ApiNotFound');
-  assert.match(err.message, /could not be found/, 'the service\'s own wording reaches the member and the log');
+  assert.equal(err.status, 400, 'the status the live log recorded');
+  assert.match(err.message, /^The API you are trying to use could not be found\. It may be available in a newer version of Excel\./, 'the service\'s own wording reaches the member and the log');
   assert.equal(mock.log.filter(e => e.method === 'DELETE').length, 1, 'sent once; a refused write is never retried by the app');
   assert.ok(mock.table('LOG_Table').rows.some(r => r[0] === 13), 'the transaction is intact');
   assert.equal(wb.halted, null, 'a clean refusal is not an incident: nothing ambiguous happened');
@@ -1123,7 +1125,7 @@ test('live 2026-09-20 replayed: a DELETE the service refuses with 404 ApiNotFoun
 test('live 2026-09-20 replayed: the connection test stops at the delete step, reports it, and says the test row is still there', async () => {
   const { mock, wb } = setup();
   await wb.load();
-  mock.failNext({ method: 'DELETE', match: /LOG_Table\/rows\/itemAt\(index=\d+\)$/, status: 404, code: 'ApiNotFound', innerCode: '', message: 'The API you are trying to use could not be found. It may be available in a newer version of Excel.' });
+  mock.failNext({ method: 'DELETE', match: /LOG_Table\/rows\/\$\/itemAt\(index=\d+\)$/, status: 400, code: '', innerCode: '', message: "The API you are trying to use could not be found. It may be available in a newer version of Excel. Please refer to the documentation: \"https://docs.microsoft.com/office/dev/add-ins/reference/requirement-sets/excel-api-requirement-sets\"." });   // as logged live: status and message; no code was recorded
   const report = await wb.selfTest({ confirmTestCopy: true });
   assert.equal(report.ok, false);
   assert.equal(report.restored, false, 'it must not claim the workbook was put back');

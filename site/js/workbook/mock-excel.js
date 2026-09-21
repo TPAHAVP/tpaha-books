@@ -309,7 +309,7 @@ export class MockWorkbook {
     const failure = injected >= 0 ? this.failures.splice(injected, 1)[0] : null;
     const fail = () => {
       if (failure.networkError) throw new TypeError('Failed to fetch');
-      return graphError(failure.status || 500, failure.code || 'InternalServerError', failure.innerCode || 'internalServerErrorUncategorized', failure.message, failure.retryAfter ? { 'Retry-After': String(failure.retryAfter) } : {});
+      return graphError(failure.status || 500, failure.code ?? 'InternalServerError', failure.innerCode ?? 'internalServerErrorUncategorized', failure.message, failure.retryAfter ? { 'Retry-After': String(failure.retryAfter) } : {});
     };
     if (failure && !failure.afterApply) return fail();
     const respond = res => (failure && failure.afterApply ? fail() : res);
@@ -386,10 +386,23 @@ export class MockWorkbook {
         const index = this._appendRows(t, body.values); this._touch();
         return respond(ok({ index, values: body.values }));
       }
-      // rows/N is what the reference page shows and what the live service refuses (2026-09-20): 404 ApiNotFound,
-      // for DELETE, GET and PATCH alike. The mock refuses it the same way so a test cannot pass on a path
-      // Microsoft rejects. Only rows/itemAt(index=N) addresses a row here.
-      if (/^rows\/\d+(?:\/range)?$/.test(sub)) return graphError(404, 'ApiNotFound', '', 'The API you are trying to use could not be found. It may be available in a newer version of Excel.');
+      // rows/N is the form the "TableRow: delete" reference page shows. On 2026-09-20 the live service answered
+      // DELETE …/rows/26 with 400 and the message below (the request log recorded status and message; it did not
+      // record the error code, which is therefore left blank rather than guessed). Refused here for every method
+      // so no test can pass on it again.
+      if (/^rows\/\d+(?:\/range)?$/.test(sub)) return graphError(400, '', '', "The API you are trying to use could not be found. It may be available in a newer version of Excel. Please refer to the documentation: \"https://docs.microsoft.com/office/dev/add-ins/reference/requirement-sets/excel-api-requirement-sets\".");
+      // The one published DELETE-by-position form, from "Working with Excel in Microsoft Graph":
+      //     DELETE …/tables('4')/rows/$/itemAt(index=6) → 204 No Content
+      // Only that form deletes a row here, so the app cannot drift onto a spelling no document shows. Whether the
+      // service accepts it is for the live test to say, not this mock; a mock-only refusal is labelled as such.
+      const delM = /^rows\/\$\/itemAt\(index=(\d+)\)$/.exec(sub);
+      if (delM) {
+        if (method !== 'DELETE') return graphError(400, 'MockNotModelled', 'mockNotModelled', `Mock: rows/$/itemAt(index=N) is modelled for DELETE only, not ${method}`);
+        const idx = Number(delM[1]);
+        if (idx < 0 || idx >= t.bodyRows) return graphError(400, 'BadRequest', 'invalidArgument', `Row index ${idx} out of range`);
+        this._deleteRow(t, idx); this._touch();
+        return respond(new Response(null, { status: 204 }));
+      }
       const rowM = /^rows\/itemAt\(index=(\d+)\)(?:\/(range))?$/.exec(sub);
       if (rowM) {
         const idx = Number(rowM[1]);
@@ -400,7 +413,7 @@ export class MockWorkbook {
           if (method === 'GET') return respond(ok(this._rangeJson(t.sheet, a)));
           if (method === 'PATCH') return respond(this._patchRange(t.sheet, a, body));
         } else {
-          if (method === 'DELETE') { this._deleteRow(t, idx); this._touch(); return respond(new Response('', { status: 200 })); }
+          if (method === 'DELETE') return graphError(400, 'MockNotModelled', 'mockNotModelled', 'Mock: DELETE on rows/itemAt(index=N) is not a documented form; the published example is rows/$/itemAt(index=N). Not modelled.');
           if (method === 'GET') return respond(ok({ index: idx, values: [this._bodyValues(t)[idx]] }));
         }
       }

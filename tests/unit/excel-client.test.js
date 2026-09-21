@@ -143,17 +143,17 @@ test('batch: sequential sub-requests share the session, return per-item results,
   await client.openSession();
   const results = await client.batch([
     { method: 'GET', path: '/workbook/tables/LOG_Table/dataBodyRange?$select=address,values,rowCount' },
-    { method: 'DELETE', path: '/workbook/tables/LOG_Table/rows/itemAt(index=1)' },
+    { method: 'DELETE', path: '/workbook/tables/LOG_Table/rows/$/itemAt(index=1)' },
   ]);
   assert.equal(results.length, 2);
   assert.equal(results[0].status, 200);
   assert.equal(results[0].body.rowCount, 13, 'the read shows the table as it was immediately before the delete');
-  assert.equal(results[1].status, 200);
+  assert.equal(results[1].status, 204, 'the published example answers 204 No Content');
   assert.equal((await client.getTableBody('LOG_Table')).rowCount, 12);
   const batchEntry = mock.log.find(e => /\$batch$/.test(e.url));
   assert.ok(batchEntry.sessionId, 'the batch request itself carries the session header');
   mock.failNext({ match: /\$batch$/, networkError: true });
-  await assert.rejects(() => client.batch([{ method: 'DELETE', path: '/workbook/tables/LOG_Table/rows/itemAt(index=1)' }]), e => e instanceof ExcelApiError && e.ambiguous === true);
+  await assert.rejects(() => client.batch([{ method: 'DELETE', path: '/workbook/tables/LOG_Table/rows/$/itemAt(index=1)' }]), e => e instanceof ExcelApiError && e.ambiguous === true);
   assert.equal(mock.log.filter(e => /\$batch$/.test(e.url)).length, 2, 'a failed batch is never resent');
 });
 
@@ -170,4 +170,19 @@ test('writes are never retried automatically, whatever helper is used', async ()
   mock.failNext({ match: /calculate/, networkError: true });
   await assert.rejects(() => client.calculate(), e => e.status === 0);
   assert.equal(mock.log.filter(e => /calculate/.test(e.url)).length, 1);
+});
+
+test('a refused request is logged with its status, code, inner code and message, so the next live failure is recorded rather than reconstructed', async () => {
+  const mock = new MockWorkbook(fixture);
+  const log = [];
+  const { client } = makeClient(mock, { log: e => log.push(e) });
+  await client.getTableBody('LISTS_Categories');                                   // one success, for contrast
+  mock.failNext({ match: /LOG_Table\/dataBodyRange/, status: 400, code: 'InvalidArgument', innerCode: 'invalidArgument', message: 'The argument is invalid or missing or has an incorrect format.' });
+  await assert.rejects(() => client.getTableBody('LOG_Table'));
+  const e = log.find(x => x.status === 400);
+  assert.ok(e, 'the refusal was logged');
+  assert.equal(e.code, 'InvalidArgument');
+  assert.equal(e.innerCode, 'invalidArgument');
+  assert.match(e.error, /argument is invalid/);
+  assert.ok(log.some(x => x.status === 200 && x.code === undefined), 'a success carries no error fields');
 });
