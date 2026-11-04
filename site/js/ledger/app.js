@@ -18,7 +18,7 @@ import { ExcelClient, describeLogEntry } from '../workbook/excel-client.js';
 import { MockWorkbook } from '../workbook/mock-excel.js';
 import { SAMPLE_WORKBOOK } from '../workbook/sample-workbook.js';
 import { LedgerWorkbook, ConflictError, VerificationError, UnresolvedOperationError, identityOf, makeMarker, monthOfIso } from '../workbook/ledger-workbook.js';
-import { findCandidates, rememberWorkbook, recallWorkbook, forgetWorkbook, resolveConfigured, workbookKey } from '../workbook/locate.js';
+import { startupWorkbook, describeAccessFailure, workbookKey } from '../workbook/locate.js';
 import { SaveController } from '../save/save-controller.js';
 import { draftKey, DraftStore, DraftStorageError, installUnloadGuard, clearDraftsForAccount, combineDrafts } from '../save/drafts.js';
 import { incidentKey, IncidentStore } from '../save/incidents.js';
@@ -30,8 +30,8 @@ import { MONTH_NAMES, CATEGORIES, DEPOSIT_CATEGORIES, WITHDRAWAL_CATEGORIES, val
 const $ = sel => document.querySelector(sel);
 const field = (form, name) => form.querySelector(`[name="${name}"]`);
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
-const GRAPH = 'https://graph.microsoft.com/v1.0';
 const MOCK_STATE_KEY = 'tpaha:test-mock-state';      // test mode only: the in-memory workbook survives a reload of this tab
+const TEST_FAIL_KEY = 'tpaha:test-fail-first-request'; // test mode only: a failure the sample workbook returns to the first request (access-error tests)
 const WRITER_ACK_KEY = 'tpaha:writer-ack';           // per browser session: the member confirmed the one-writer rule
 
 const state = {
@@ -65,6 +65,7 @@ async function main() {
     const mock = new MockWorkbook(SAMPLE_WORKBOOK);
     try { const saved = sessionStorage.getItem(MOCK_STATE_KEY); if (saved) mock.importState(JSON.parse(saved)); } catch { /* fresh sample */ }
     mock.onChange = m => { try { sessionStorage.setItem(MOCK_STATE_KEY, JSON.stringify(m.exportState())); } catch { /* ignore */ } };
+    try { const f = sessionStorage.getItem(TEST_FAIL_KEY); if (f) { sessionStorage.removeItem(TEST_FAIL_KEY); mock.failNext(JSON.parse(f)); } } catch { /* no injected failure */ }
     window.__tpahaMock = mock;
     window.__tpahaRequestLog = requestLogText;
     state.client = new ExcelClient({ getToken: async () => 'test-mode', driveId: 'TEST', itemId: 'TEST', fetchImpl: (u, o) => mock.fetch(u, o), log: logRequest });
@@ -75,8 +76,12 @@ async function main() {
     state.mode = 'connected';
     if (!state.auth.account) { $('#main').replaceChildren(signInGate(state.auth, 'Treasurer Ledger')); $('#tabs').hidden = true; return; }
     state.who = { tenantId: state.auth.tenantId || state.auth.account.tenantId || 'tenant', homeAccountId: state.auth.account.homeAccountId || state.auth.account.username, app: 'ledger' };
-    state.workbook = resolveConfigured(CONFIG, 'ledger') || recallWorkbook(localStorage, state.who);
-    if (!state.workbook) { await showPicker(); return; }
+    // One workbook for everyone: the one pinned in config.js. A copy this device remembered is ignored and
+    // forgotten; without a pin the page stops here. It never searches OneDrive for candidates.
+    const { workbook, replaced } = startupWorkbook({ config: CONFIG, storage: localStorage, who: state.who });
+    if (!workbook) { showConfigError(); return; }
+    state.workbook = workbook;
+    if (replaced) state.startupNotice = `This device had remembered "${replaced.name || 'another workbook'}". That choice has been cleared: the page now opens only ${workbook.name || 'the configured workbook'}.`;
     state.client = new ExcelClient({ getToken: state.auth.getToken, driveId: state.workbook.driveId, itemId: state.workbook.itemId, log: logRequest });
   }
   state.wb = new LedgerWorkbook(state.client);
@@ -102,8 +107,30 @@ async function main() {
   window.__tpahaSecondaryTab = () => state.secondaryTab;
   window.__tpahaBusy = isBusy;
   $('#btn-refresh').addEventListener('click', () => reload('Refreshed from the workbook'));
-  await reload();
+  if (!(await reload())) { showAccessError(state.loadError); return; }
+  if (state.startupNotice) toast(state.startupNotice, 'info');
   restoreDraft();
+}
+
+/** The configured workbook could not be read at start-up: say why, offer a retry, and open nothing else. */
+function showAccessError(err) {
+  const t = describeAccessFailure(err, state.workbook && state.workbook.name);
+  $('#tabs').hidden = true;
+  $('#main').replaceChildren(h('section', { className: 'card gate', id: 'access-error', role: 'alert' },
+    h('h2', {}, t.title),
+    h('p', {}, t.reason),
+    h('p', { className: 'small' }, t.scope),
+    h('p', { className: 'small muted' }, t.detail),
+    h('div', { className: 'row-end', style: 'justify-content:center' },
+      h('button', { type: 'button', className: 'btn btn-primary', id: 'btn-retry', onClick: () => location.reload() }, 'Try again'),
+      state.mode === 'connected' ? h('button', { type: 'button', className: 'btn', id: 'btn-access-signout', onClick: requestSignOut }, 'Sign out') : null)));
+}
+/** No workbook is pinned in config.js on this deployment: a configuration problem, not something a member can fix here. */
+function showConfigError() {
+  $('#tabs').hidden = true;
+  $('#main').replaceChildren(h('section', { className: 'card gate', id: 'access-error', role: 'alert' },
+    h('h2', {}, 'No workbook is configured for this site'),
+    h('p', {}, 'The treasurer workbook is set in the site configuration, not chosen on the page. Tell the person who publishes the site. Nothing was opened and nothing was written.')));
 }
 
 function showBanner(text) { const b = $('#mode-banner'); b.textContent = text; b.hidden = false; }
@@ -169,6 +196,7 @@ function expectedDuplicateIdentities() {
 }
 async function reload(message) {
   try {
+    state.loadError = null;
     $('#sync-status').firstElementChild.textContent = state.workbook.name || '';
     const snap = await state.wb.load({ expectedDuplicates: expectedDuplicateIdentities() });   // never lifts a pause; may add one (duplicate copies found)
     state.snapshot = snap;
@@ -190,45 +218,14 @@ async function reload(message) {
     renderTab();
     renderWorkbookInfo();
     if (message) toast(message);
+    return true;
   } catch (e) {
     console.error(e);
+    state.loadError = e;
     toast(`Could not read the workbook: ${e.message}`, 'error');
     $('#list-summary').textContent = `Could not read the workbook: ${e.message}`;
+    return false;
   }
-}
-
-// ---- workbook picker (connected mode, first time) -----------------------------------------
-async function graphGet(path) {
-  const token = await state.auth.getToken();
-  const res = await fetch(path.startsWith('http') ? path : GRAPH + path, { headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' } });
-  if (!res.ok) throw new Error(`Graph ${res.status}`);
-  return res.json();
-}
-async function showPicker() {
-  $('#tabs').hidden = true;
-  const main = $('#main');
-  const list = h('div', { className: 'table-wrap' }, h('p', { className: 'muted' }, 'Searching your OneDrive…'));
-  main.replaceChildren(h('section', { className: 'card gate' },
-    h('h2', {}, 'Which workbook should the ledger use?'),
-    h('p', {}, `Files named like "${CONFIG.workbookSearch}" in your OneDrive and files shared with you. Check the folder and last-changed time before choosing. Your choice is remembered on this device for your account.`),
-    list));
-  const cands = await findCandidates(graphGet, { query: CONFIG.workbookSearch });
-  list.replaceChildren(candidatesTable(cands, async c => {
-    rememberWorkbook(localStorage, state.who, c);
-    location.reload();
-  }));
-  for (const w of cands.warnings) list.append(h('p', { className: 'warn small' }, w));
-}
-export function candidatesTable(cands, onChoose) {
-  if (!cands.length) return h('p', { className: 'warn' }, 'No .xlsx workbook found. Make sure the file is in your OneDrive or has been shared with you.');
-  return h('table', { id: 'candidates' },
-    h('thead', {}, h('tr', {}, h('th', {}, 'Name'), h('th', {}, 'Where'), h('th', {}, 'Last changed'), h('th', { className: 'num' }, 'Size'), h('th'))),
-    h('tbody', {}, cands.map(c => h('tr', {},
-      h('td', {}, c.name),
-      h('td', {}, c.source === 'shared' ? `Shared by ${c.sharedBy || 'someone'}` : `My OneDrive ${c.path}`),
-      h('td', {}, c.lastModified ? new Date(c.lastModified).toLocaleString() : ''),
-      h('td', { className: 'num' }, c.size ? `${Math.round(c.size / 1024)} KB` : ''),
-      h('td', {}, h('button', { type: 'button', className: 'btn btn-sm btn-primary btn-choose', onClick: () => onChoose(c) }, 'Choose'))))));
 }
 
 // ---- shared form helpers -----------------------------------------------------------------
@@ -948,11 +945,6 @@ function buildSettings() {
     }
   });
   $('#btn-signout').addEventListener('click', requestSignOut);
-  $('#btn-change-workbook').addEventListener('click', async () => {
-    if (hasUnsaved() && !(await confirmDialog('You have unsaved changes. Choose a different workbook anyway?', { okLabel: 'Continue', danger: true }))) return;
-    forgetWorkbook(localStorage, state.who);
-    location.reload();
-  });
   $('#btn-copy-log').addEventListener('click', async () => {
     const text = requestLogText();
     if (!text) { toast('No requests have been made yet.', 'info'); return; }
@@ -1003,10 +995,9 @@ function renderWorkbookInfo() {
   info.replaceChildren(h('dl', { className: 'kv' },
     h('dt', {}, 'Workbook'), h('dd', {}, m.name || state.workbook.name || ''),
     h('dt', {}, 'Last changed'), h('dd', {}, m.lastModifiedDateTime ? new Date(m.lastModifiedDateTime).toLocaleString() : ''),
-    h('dt', {}, 'Where'), h('dd', {}, state.mode === 'test' ? 'In-memory sample (test mode)' : (state.workbook.source === 'config' ? 'Pinned in the site configuration' : 'Chosen on this device')),
+    h('dt', {}, 'Where'), h('dd', {}, state.mode === 'test' ? 'In-memory sample (test mode)' : 'The club workbook set in the site configuration; the same for every member and device'),
     h('dt', {}, 'Read'), h('dd', {}, state.snapshot ? new Date(state.snapshot.loadedAt).toLocaleTimeString() : ''),
     h('dt', {}, 'Writer model'), h('dd', {}, CONFIG.pilot && CONFIG.pilot.writerModel === 'single' ? 'Pilot: one designated writer at a time; simultaneous editing is not supported.' : 'not set')));
-  $('#btn-change-workbook').hidden = !(state.mode === 'connected' && state.workbook.source !== 'config');
 }
 
 async function requestSignOut() {

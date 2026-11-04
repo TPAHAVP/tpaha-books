@@ -81,3 +81,43 @@ export function resolveConfigured(config, app) {
   const w = config && config.workbooks && config.workbooks[app];
   return w && w.driveId && w.itemId ? { driveId: w.driveId, itemId: w.itemId, name: w.name || '', source: 'config' } : null;
 }
+
+/**
+ * The workbook the ledger page opens at start-up: the pinned one, always. A choice this device remembered for
+ * the signed-in account (a test copy picked through the old picker) is ignored and removed, so it cannot come
+ * back if the pin is ever lifted. Without a pin nothing is opened: the page does not fall back to a remembered
+ * copy and never searches. Returns { workbook, replaced } where `replaced` is the forgotten record, if any.
+ */
+export function startupWorkbook({ config, storage, who, app = 'ledger' }) {
+  const pinned = resolveConfigured(config, app);
+  if (!pinned) return { workbook: null, replaced: null };
+  const remembered = recallWorkbook(storage, who);
+  if (remembered) forgetWorkbook(storage, who);
+  return { workbook: pinned, replaced: remembered };
+}
+
+/**
+ * Words for a failure to open the configured workbook. `title`, `reason`, `scope` and `detail` are sentences
+ * for the page; the drive and item ids are deliberately not among them.
+ */
+export function describeAccessFailure(err, name) {
+  const e = err || {};
+  const status = Number(e.status) || 0;
+  const code = String(e.innerCode || e.code || '');
+  const message = e.message ? String(e.message) : '';
+  let reason;
+  if (status === 403 || /accessDenied|forbidden|unauthenticated/i.test(code)) reason = `Your Microsoft account does not have access to this workbook, or the access has been withdrawn. Ask the treasurer to share ${name || 'the workbook'} with you, then try again.`;
+  else if (status === 401) reason = 'Your sign-in is no longer valid. Sign out, sign in again, then try again.';
+  else if (status === 404 || /itemNotFound|notFound/i.test(code)) reason = `The configured workbook was not found where the site expects it. It may have been moved, renamed or deleted. Nothing has been changed; tell the treasurer before doing anything else.`;
+  else if (status === 0) reason = `Microsoft 365 could not be reached (${message || 'network problem'}). Check the connection and try again.`;
+  else reason = `Microsoft 365 refused the request${message ? `: ${message}` : ''}. Try again in a moment; if it keeps failing, tell the treasurer.`;
+  const parts = [status ? `HTTP ${status}` : 'no HTTP answer'];
+  if (code) parts.push(`code ${code}`);
+  if (e.requestId) parts.push(`request-id ${e.requestId}`);
+  return {
+    title: `Could not open ${name || 'the configured workbook'}`,
+    reason,
+    scope: 'This page opens only the workbook configured for the club and does not search for other copies. Nothing was written.',
+    detail: parts.join(' · '),
+  };
+}

@@ -9,6 +9,39 @@ or in the repository; nothing has connected to Microsoft 365; no production work
 
 ---
 
+## 2026-11-03 (late) — Ledger page pinned to the club workbook `TPAHA_2026.xlsx`: **implemented locally with tests, unpublished, for review**
+
+Requested after the session fix was published: the published treasurer page is to open the real club workbook
+automatically after sign-in on every device, with no picker. Done locally, nothing published, no workbook or
+permission touched:
+
+- `site/js/config.js`: `workbooks.ledger` pinned to `TPAHA_2026.xlsx` by drive id and item id (opaque Microsoft
+  identifiers, not a link or credential; access is still decided by Microsoft 365 per member). Locally served
+  pages keep blank ids and the in-memory sample, so the automated tests never reach it. `allowWorkbookPicker`
+  false. `appVersion` 2026.11.03 so the service worker's cache key changes and phones fetch the new files.
+- `site/js/workbook/locate.js`: `startupWorkbook` returns the pinned workbook always, ignores and removes a
+  choice the device remembered for the account (a test copy chosen through the old picker), and without a pin
+  returns nothing (never a remembered copy); `describeAccessFailure` words a refusal (403 access, 401 sign-in,
+  404 not found, network, other) with status, code and request id, ids kept out.
+- `site/js/ledger/app.js` and `site/ledger.html`: the picker, the OneDrive search and "Choose a different
+  workbook" are removed from the ledger page; a failed first read shows an access-error card (`#access-error`)
+  with "Try again" and "Sign out", tabs hidden, nothing searched; a cleared remembered choice is announced once.
+  The Diagnostics page keeps its own search, unchanged.
+- `tools/verify-config.mjs`: now requires the pinned name and ids, blank ids when served locally, no picker, the
+  storage workbook unpinned, no search or remembered-choice code on the ledger page, no change control in the
+  page, and a dated `appVersion` at or after the pin (30 checks).
+- Tests: `tests/unit/pinned-workbook.test.js` (6: fresh device and account; device remembering a test copy;
+  another account's record untouched; no pin means nothing opened; access wording for 403/404/other/network)
+  and `tests/e2e/pinned-workbook.spec.js` (3 × 3 browsers: no selection control; 403 and 404 on the first
+  session request show the access error, search nothing, and "Try again" opens the ledger once the failure
+  is gone). All failed before the change. Results: unit 183, browser 222, verify:config 30, all passing.
+- Not covered by automation: a real sign-in on a fresh device and on the device that remembers the test copy;
+  that is the live check after publishing (the published page will open `TPAHA_2026.xlsx`, not the test copy).
+
+Diff for review: `data/review/2026-11-03-pinned-workbook.diff` (git-ignored). Unpublished.
+
+---
+
 ## 2026-11-03 — First live correction on the test copy refused: "The target session is invalid." **Cause found in the client's error classification; fixed locally with tests; nothing published; test row left in place**
 
 Reported by Cody: add of test row #71 succeeded (63 → 64); the correction of that row was refused with "The

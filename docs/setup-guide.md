@@ -78,10 +78,10 @@ Run `npm run verify:config` after any change here. It checks the id formats, the
 the app actually derives, the scopes requested, and that no secret has crept into the site. It never contacts
 Microsoft.
 
-Leave `workbooks.ledger` blank for now: each member picks and confirms the workbook once (Diagnostics page or first open) and the choice is remembered in their browser, per account. Once the association has decided which workbook is the live one, its drive id and item id (shown on the Diagnostics page) can be pinned here so nobody has to choose.
+`workbooks.ledger` is pinned to the club workbook, `TPAHA_2026.xlsx` (drive id and item id as shown on the Diagnostics page; done 2026-11-03). The published ledger page opens that file for every member on every device as soon as they have signed in; it has no picker and no "choose a different workbook", a copy a device remembered from the earlier picker is ignored and cleared, and when the file cannot be opened the page shows the access error (status, code, request id) and stops rather than searching for other copies. Locally served pages keep blank ids and the in-memory sample, so the automated tests never touch the club workbook. `npm run verify:config` checks the pinned ids. The Diagnostics page keeps its own search for comparing copies.
 
 Commit and push. Pages redeploys within a couple of minutes. Change `appVersion` whenever you deploy so phones
-pick up the new files; it is `2026.09.11` for this change.
+pick up the new files; it was `2026.09.11` for that change and is `2026.11.03` for the pinned workbook.
 
 **What publishing this change does.** Until it is pushed, the live site is a harmless test-mode page. Once it
 is, the published site asks assigned members to sign in and can read and write the workbook they choose. That

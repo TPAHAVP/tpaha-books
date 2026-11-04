@@ -18,6 +18,13 @@ const EXPECTED = {
   tenantId: 'ef5ad4e3-2b18-4542-8fd2-ed7212cbcc93',
   site: 'https://tpahavp.github.io/tpaha-books/',
   scopes: ['Files.ReadWrite', 'User.Read'],
+  // The club's treasurer workbook, pinned 2026-11-03. Change these only when the club moves to another file.
+  ledger: {
+    name: 'TPAHA_2026.xlsx',
+    driveId: 'b!O4R42hSWcEGFTomb8sxHJ9A0OrJC045NrcKyGO_FkY9O3XaCxPiCSKILopSmUmlS',
+    itemId: '01WV6K6T2HOQUUIGZNTRFZ7PF7IDDUKMEM',
+  },
+  firstPinnedVersion: '2026.11.03',   // appVersion of the release that pinned the workbook; later releases must be later
 };
 const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
@@ -75,7 +82,22 @@ const walk = dir => {
 walk('site');
 check('No client secret, certificate or private key anywhere in the published site', leaks.length === 0, leaks.join(', '));
 
-check('No workbook is pinned: the member must identify and confirm one', live.workbooks.ledger.driveId === '' && live.workbooks.ledger.itemId === '');
+// One workbook for everyone. The published page opens the pinned club workbook; locally served pages (test mode)
+// get blank ids and the in-memory sample, so the automated tests never touch it.
+const L = live.workbooks.ledger;
+check('The ledger workbook is pinned to the club workbook by name', L.name === EXPECTED.ledger.name, L.name);
+check('The pinned drive id is the expected one', L.driveId === EXPECTED.ledger.driveId && /^b![A-Za-z0-9_-]{20,}$/.test(L.driveId));
+check('The pinned item id is the expected one', L.itemId === EXPECTED.ledger.itemId && /^[0-9A-Z]{20,}$/.test(L.itemId));
+for (const host of ['localhost', '127.0.0.1']) {
+  const c = await asServedFrom(host);
+  check(`Served from "${host}": no workbook pinned, the in-memory sample is used`, c.workbooks.ledger.driveId === '' && c.workbooks.ledger.itemId === '');
+}
+check('The ledger page has no workbook picker', live.allowWorkbookPicker === false);
+check('The Winter Storage workbook stays unpinned (out of scope)', live.workbooks.storage.driveId === '' && live.workbooks.storage.itemId === '');
+const ledgerApp = readFileSync(join(root, 'site/js/ledger/app.js'), 'utf8');
+check('The ledger page neither searches OneDrive nor remembers a chosen workbook', !/findCandidates|rememberWorkbook|recallWorkbook\(/.test(ledgerApp) && ledgerApp.includes('startupWorkbook('));
+check('The ledger page has no "choose a different workbook" control', !readFileSync(join(root, 'site/ledger.html'), 'utf8').includes('btn-change-workbook'));
+check('appVersion is a dated release value at or after the pin, so phones refresh their cached files', /^\d{4}\.\d{2}\.\d{2}$/.test(live.appVersion) && live.appVersion >= EXPECTED.firstPinnedVersion, live.appVersion);
 check('Pilot writer model is single-writer', live.pilot.writerModel === 'single');
 
 const failed = results.filter(r => !r.ok);

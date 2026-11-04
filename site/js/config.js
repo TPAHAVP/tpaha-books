@@ -32,16 +32,28 @@ const ENTRA = {
   tenantId: 'ef5ad4e3-2b18-4542-8fd2-ed7212cbcc93',   // Directory (tenant) ID: restricts sign-in to TPAHA
 };
 
+// The club's treasurer workbook, pinned 2026-11-03: the published ledger page opens this file and no other, for
+// every member on every device, as soon as they have signed in. The ids are Microsoft's opaque drive and item
+// identifiers (shown on the Diagnostics page), not a sharing link and not a credential: a member who cannot open
+// the file in OneDrive cannot open it here either. A workbook a device remembered earlier (a test copy chosen
+// through the old picker) is ignored and forgotten. When this file cannot be opened the page says so and stops;
+// it never searches for other copies. Locally served pages get blank ids and the in-memory sample (test mode).
+const LEDGER_WORKBOOK = {
+  name: 'TPAHA_2026.xlsx',
+  driveId: 'b!O4R42hSWcEGFTomb8sxHJ9A0OrJC045NrcKyGO_FkY9O3XaCxPiCSKILopSmUmlS',
+  itemId: '01WV6K6T2HOQUUIGZNTRFZ7PF7IDDUKMEM',
+};
+const NO_WORKBOOK = { driveId: '', itemId: '', name: '' };
+
 export const CONFIG = {
   clientId: servedLocally ? '' : ENTRA.clientId,
   tenantId: servedLocally ? '' : ENTRA.tenantId,
   workbooks: {
-    // Leave blank to let the signed-in member pick the workbook (search by name, confirm, remembered per account).
-    ledger: { driveId: '', itemId: '', name: '' },
-    storage: { driveId: '', itemId: '', name: '' },
+    ledger: servedLocally ? NO_WORKBOOK : LEDGER_WORKBOOK,
+    storage: NO_WORKBOOK,     // Winter Storage is out of scope; its page is unchanged
   },
-  workbookSearch: 'TPAHA_2026',   // name used when searching the member's OneDrive for the ledger workbook
-  allowWorkbookPicker: true,
+  workbookSearch: 'TPAHA_2026',   // used only by the Diagnostics page's search; the ledger page never searches
+  allowWorkbookPicker: false,     // the ledger page has no workbook picker and no "choose a different workbook
   // Pilot writer model (docs/workbook-mapping.md §3b, docs/setup-guide.md E). 'single' = one designated writer at
   // a time: the page asks each session to confirm before its first Correct or Delete, refuses to write from a
   // second tab of the same browser, and states that it does not support simultaneous editing.
@@ -49,6 +61,6 @@ export const CONFIG = {
     writerModel: 'single',
     note: 'Pilot: one designated writer at a time. Do not use this page in two tabs or on two devices, and do not edit the workbook in Excel or run its script buttons while it is in use. Simultaneous editing is not supported.',
   },
-  appVersion: '2026.09.11',
+  appVersion: '2026.11.03',       // change on every release: the service worker caches by this value
   siteName: 'TPAHA Books',
 };
