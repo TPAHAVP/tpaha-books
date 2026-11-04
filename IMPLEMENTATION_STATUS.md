@@ -46,6 +46,20 @@ same entries selected on the page. Tests: `tests/unit/request-log.test.js` (8) a
 177 passed, browser 213 passed. Cumulative diff: `data/review/2026-11-03-session-fix.diff`; this round alone:
 `data/review/2026-11-03-session-fix-round2-only.diff` (both git-ignored). Still unpublished; the live site runs
 the old classifier until Cody publishes. OneDrive, #71 and the pending browser correction untouched.
+**Published, 2026-11-03 evening (reviewer's go-ahead after round 2): `b966ad4`.** Runbook Part 0: 0.1 unit 177 /
+browser 213 / verify:config 21, all passing; the tree still held the unreviewed 2026-11-02 documentation
+(`docs/handoff-2026-11-02.md`, runbook and mapping notes), which was deliberately left uncommitted. 0.2 two
+commits went out (`5bd2923`, the September record that had never been pushed, and `b966ad4`), 15 files, the
+private-file check empty, no local paths or figures in the diff. 0.3 pushed `6c51573..b966ad4`. 0.4 "Deploy TPAHA
+Books to GitHub Pages" run 41749353089 completed with success about 35 seconds after the push. 0.5 the served
+`excel-client.js`, `ledger/app.js`, `save-controller.js`, `mock-excel.js`, `diagnostics.js`, `ledger.html` and
+`css/app.css` each hash to their committed blob (fetched with `?nocache=`); `config.js` unchanged at
+`BC25AC6C…`; the served client contains `invalidSessionReCreatable` and the batch/operation log markers; the
+served ledger page contains the show/download controls; ledger page 200. Nobody signed in; no OneDrive write;
+#71 and the pending browser correction untouched; `TPAHA_2026.xlsx` unchanged. Note for the next load on a phone:
+the service worker serves scripts cache-first and refreshes in the background, so the first load after this
+release may still run the old client; a second load (or a hard refresh) runs the new one.
+
 
 ---
 
