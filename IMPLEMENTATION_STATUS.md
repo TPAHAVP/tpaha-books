@@ -9,6 +9,46 @@ or in the repository; nothing has connected to Microsoft 365; no production work
 
 ---
 
+## 2026-11-03 — First live correction on the test copy refused: "The target session is invalid." **Cause found in the client's error classification; fixed locally with tests; nothing published; test row left in place**
+
+Reported by Cody: add of test row #71 succeeded (63 → 64); the correction of that row was refused with "The
+target session is invalid."; **Check workbook** then showed the "answer from Microsoft was lost" text; no retry,
+no delete; nobody else editing. The ledger page keeps no request log (`app.js:67` passes no `log`), so the codes
+were not recorded.
+
+Verified defect (`docs/incident-2026-11-03-paused-session.md`): `classifyError` tested only the deepest inner
+code. Microsoft's paused-session envelope for this exact message is three levels deep (`InvalidSession` →
+`invalidSessionReCreatable` → `InvalidOrTimedOutSession`, public report on Microsoft Q&A), so neither
+`sessionInvalid` nor `recreatable` was set, the dead session id was kept, the pre-write GET was not retried, and
+every later request of the page, including the read-only check, failed the same way until a reload. The
+lost-answer wording came from `check()` labelling its own failure as an unconfirmed write. **Inferred, not
+captured:** that the live refusal carried that envelope, and that it struck the correction's initial read (nothing
+written) rather than a later read (corrected copy appended, old copy still present). A reload runs the read-only
+check on a fresh session and settles which.
+
+Fix applied locally, unpublished: second-level classification with the whole chain kept for the log; automatic
+recovery only on `invalidSessionReCreatable` (reads retried once on a new session, writes never replayed); any
+other session error blocks the client until a reload; the controller and page say "Could not check the workbook
+… remains unconfirmed" instead of "answer was lost"; the ledger page keeps a request log (no token, session id or
+record content) with "Copy request log" on the Settings tab. Tests: `tests/unit/session-errors.test.js` (11) and
+`tests/e2e/session.spec.js` (4 × 3 browsers). Results: unit 169 passed (158 before), browser 201 passed.
+
+Review round 2 (same day, still unpublished): the reviewer reproduced a `createSession` failure that left the
+log empty, and noted that the clipboard fallback pointed at Diagnostics, whose log is another page's. Fixed:
+every session-creation attempt (refusal, network error, 504 retry), the 202 and each poll of an asynchronous
+creation with its outcome (running/succeeded/failed, with the operation's error codes), and the final session
+read are logged with status, timing, request id and codes; the operation key and session resource key are
+written as `…`. A batch refused as a whole keeps its codes in the log, and every sub-request gets its own line
+("in batch: …") with its status and codes. The Settings tab has "Show request log" (readonly text box plus
+"Download request log" as a text file); when the clipboard rejects or is absent, "Copy request log" shows the
+same entries selected on the page. Tests: `tests/unit/request-log.test.js` (8) and `tests/e2e/request-log.spec.js`
+(4 × 3 browsers, including the clipboard rejecting and absent, and the downloaded file's text). Results: unit
+177 passed, browser 213 passed. Cumulative diff: `data/review/2026-11-03-session-fix.diff`; this round alone:
+`data/review/2026-11-03-session-fix-round2-only.diff` (both git-ignored). Still unpublished; the live site runs
+the old classifier until Cody publishes. OneDrive, #71 and the pending browser correction untouched.
+
+---
+
 ## 2026-09-20 (fifth) — **Published: `6c51573`, the delete-path fix.** Part 0 run in full; every verification passed. **No workbook write**
 
 Cody authorised publishing the reviewed fix. Runbook Part 0, step by step:

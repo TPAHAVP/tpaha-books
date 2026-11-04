@@ -50,6 +50,7 @@ export class SaveController {
     this.result = null;
     this.needsVerification = false;
     this.incomplete = null;       // inspect() said: landed but finishing steps unconfirmed
+    this.checkFailed = null;      // the last check() could not read: the pending attempt remains unconfirmed
   }
 
   get hasUnsavedEdits() {
@@ -57,7 +58,7 @@ export class SaveController {
   }
 
   _snapshot() {
-    return { state: this.state, phase: this.phase, draft: this.draft, pending: this.pending, error: this.error, conflict: this.conflict, result: this.result, needsVerification: this.needsVerification, incomplete: this.incomplete, hasUnsavedEdits: this.hasUnsavedEdits };
+    return { state: this.state, phase: this.phase, draft: this.draft, pending: this.pending, error: this.error, conflict: this.conflict, result: this.result, needsVerification: this.needsVerification, incomplete: this.incomplete, checkFailed: this.checkFailed, hasUnsavedEdits: this.hasUnsavedEdits };
   }
   _setState(state, phase = null) {
     this.state = state;
@@ -97,6 +98,7 @@ export class SaveController {
     this.conflict = null;
     this.needsVerification = false;
     this.incomplete = null;
+    this.checkFailed = null;
     try {
       let marker;
       if (this.pending) {
@@ -132,6 +134,7 @@ export class SaveController {
     if (this.state === 'saving') return { ignored: true, reason: 'saving' };
     this.error = null;
     this.incomplete = null;
+    this.checkFailed = null;
     this._setState('saving', 'checking');
     try {
       const r = (await this.inspect(this.pending.payload, { marker: this.pending.marker })) || { outcome: 'missing' };
@@ -154,7 +157,10 @@ export class SaveController {
       this._setState('failed');
       return { found: false, outcome: 'missing' };
     } catch (e) {
+      // The CHECK failed to read; nothing is known about the pending attempt, which stays pending. This is
+      // not a lost answer to a write, and the page must not describe it as one (live refusal of 2026-11-03).
       this.error = e;
+      this.checkFailed = e;
       this.needsVerification = true;
       this._setState('failed');
       return { found: false, error: e };

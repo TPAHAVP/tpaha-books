@@ -199,3 +199,7 @@ dialog.conflict h3 { color: var(--warn); }
 .banner.report { background: #eef3e9; color: #33471f; border-bottom: 1px solid #cfdcc0; }
 .banner.report p { margin: .3rem 0 0; }
 .banner.report .row { margin-top: .5rem; }
+
+/* Request log shown on the page (Settings tab) when the clipboard is unavailable or on request */
+.request-log { margin-top: .75rem; }
+.request-log-text { font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; width: 100%; min-height: 10rem; padding: .5rem; border: 1px solid var(--line); border-radius: 10px; background: #fff; color: var(--text); white-space: pre; overflow: auto; resize: vertical; }

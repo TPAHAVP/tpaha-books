@@ -8,10 +8,18 @@ import { parseAddress, rangeAddress, indexToCol, serialToIso, formatText } from 
 const MONEY = '$#,##0.00';
 const LOG_FORMATS = ['General', 'yyyy-mm-dd hh:mm:ss', 'yyyy-mm-dd', 'General', 'General', MONEY, 'General', 'General', 'General'];
 
+/** `innerCode` may be an array: Microsoft nests one innerError per level (the paused-session envelope has two). */
 function graphError(status, code, innerCode, message, extraHeaders = {}) {
-  const body = { error: { code, message: message || code, innerError: { code: innerCode, 'request-id': `mock-${Date.now()}`, date: new Date().toISOString() } } };
-  return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json', 'request-id': body.error.innerError['request-id'], ...extraHeaders } });
+  const codes = Array.isArray(innerCode) ? innerCode : [innerCode];
+  const requestId = `mock-${Date.now()}`;
+  let inner = null;
+  for (let i = codes.length - 1; i >= 0; i--) inner = inner ? { code: codes[i], innerError: inner } : { code: codes[i] };
+  Object.assign(inner, { 'request-id': requestId, date: new Date().toISOString() });
+  const body = { error: { code, message: message || code, innerError: inner } };
+  return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json', 'request-id': requestId, ...extraHeaders } });
 }
+/** The envelope Microsoft sends for a session it paused for inactivity (public report, Microsoft Q&A 2021-08-24). */
+export const PAUSED_SESSION = { status: 400, code: 'InvalidSession', innerCode: ['invalidSessionReCreatable', 'InvalidOrTimedOutSession'], message: 'The target session is invalid.' };
 const ok = (obj, status = 200) => obj === null ? new Response(null, { status: 204 }) : new Response(JSON.stringify(obj), { status, headers: { 'Content-Type': 'application/json', 'request-id': `mock-${Date.now()}` } });
 const clone = o => JSON.parse(JSON.stringify(o));
 
@@ -24,8 +32,10 @@ export class MockWorkbook {
     this.sessions = new Set();
     this._sessionCounter = 0;
     this.slowSessionCreation = 0;
+    this.sessionCreationOutcome = null;   // { status: 'failed', code, innerCode, message }: what the last poll of an asynchronous creation reports
     this._operations = new Map();
     this.failures = [];
+    this.sessionError = null;    // set by pauseSession() / breakSession(): the envelope a stale session id receives
     this.log = [];
     this.beforeRespond = null;
     this.hidden = new Map();     // sheet name -> Set of hidden row numbers
@@ -88,7 +98,11 @@ export class MockWorkbook {
   setHiddenRows(sheetName, rows) { this.hidden.set(sheetName, new Set(rows)); this._touch(); }
   getCell(sheetName, address) { const a = parseAddress(address); return this._get(this._sheet(sheetName), a.r1, a.c1).v; }
   failNext(spec) { this.failures.push(spec); }
-  expireSession() { this.sessions.clear(); }
+  expireSession() { this.sessions.clear(); this.sessionError = null; }
+  /** Every known session id now answers with Microsoft's paused-session envelope; a new session works. */
+  pauseSession() { this.sessions.clear(); this.sessionError = PAUSED_SESSION; }
+  /** Every known session id now answers with a session error Microsoft does not call recreatable. */
+  breakSession(innerCode = 'invalidSessionNotFound') { this.sessions.clear(); this.sessionError = { status: 400, code: 'InvalidSession', innerCode: [innerCode], message: 'The target session is invalid.' }; }
   snapshot() {
     const out = {};
     for (const [name, s] of this.sheets) if (!s.computed) out[name] = [...s.cells.entries()].sort(([a], [b]) => a.localeCompare(b));
@@ -343,7 +357,7 @@ export class MockWorkbook {
         const opId = `op${this._operations.size + 1}`;
         this._operations.set(opId, { remaining: this.slowSessionCreation });
         this.slowSessionCreation = 0;
-        return new Response('{}', { status: 202, headers: { Location: `${u.origin}${u.pathname.replace(/\/workbook\/createSession$/, '')}/workbook/operations/${opId}`, 'Content-Type': 'application/json' } });
+        return new Response('{}', { status: 202, headers: { Location: `${u.origin}${u.pathname.replace(/\/workbook\/createSession$/, '')}/workbook/operations/${opId}`, 'Content-Type': 'application/json', 'request-id': `mock-${Date.now()}` } });
       }
       const id = `session-${++this._sessionCounter}`;
       this.sessions.add(id);
@@ -354,6 +368,13 @@ export class MockWorkbook {
       const op = this._operations.get(opId);
       if (!op) return graphError(404, 'ItemNotFound', 'itemNotFound');
       if (op.remaining > 0) { op.remaining -= 1; return ok({ id: opId, status: 'running' }); }
+      const o = this.sessionCreationOutcome;
+      if (o && o.status === 'failed') {
+        const codes = Array.isArray(o.innerCode) ? o.innerCode : [o.innerCode];
+        let inner = null;
+        for (let i = codes.length - 1; i >= 0; i--) inner = inner ? { code: codes[i], innerError: inner } : { code: codes[i] };
+        return ok({ id: opId, status: 'failed', error: { code: o.code, message: o.message || o.code, innerError: inner } });
+      }
       return ok({ id: opId, status: 'succeeded', resourceLocation: `${u.origin}${u.pathname.replace(/\/workbook\/operations\/.*$/, '')}/workbook/sessionInfoResource(key='${opId}')` });
     }
     if (/^\/workbook\/sessionInfoResource/.test(rel)) {
@@ -362,7 +383,10 @@ export class MockWorkbook {
       return ok({ id, persistChanges: true });
     }
     if (rel === '/workbook/closeSession') { if (sessionId) this.sessions.delete(sessionId); return ok(null); }
-    if (sessionId && !this.sessions.has(sessionId)) return graphError(404, 'ItemNotFound', 'invalidSessionReCreatable', 'The workbook session does not exist or has expired.');
+    if (sessionId && !this.sessions.has(sessionId)) {
+      const s = this.sessionError;
+      return s ? graphError(s.status, s.code, s.innerCode, s.message) : graphError(404, 'ItemNotFound', 'invalidSessionReCreatable', 'The workbook session does not exist or has expired.');
+    }
     if (rel === '/workbook/application/calculate') return respond(ok(null));
 
     const prot = /^\/workbook\/worksheets\/([^/]+)\/protection$/.exec(rel.split('?')[0]);

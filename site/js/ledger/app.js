@@ -14,7 +14,7 @@
 //   session, refuses to write from a second tab of the same browser, and says so.
 import { CONFIG } from '../config.js';
 import { initAuth } from '../auth.js';
-import { ExcelClient } from '../workbook/excel-client.js';
+import { ExcelClient, describeLogEntry } from '../workbook/excel-client.js';
 import { MockWorkbook } from '../workbook/mock-excel.js';
 import { SAMPLE_WORKBOOK } from '../workbook/sample-workbook.js';
 import { LedgerWorkbook, ConflictError, VerificationError, UnresolvedOperationError, identityOf, makeMarker, monthOfIso } from '../workbook/ledger-workbook.js';
@@ -44,6 +44,18 @@ const state = {
   tabGuard: null, secondaryTab: false,
 };
 
+// ---- request log ---------------------------------------------------------------------------
+// Every Graph request of this page, as the diagnostics page records them, so a live refusal is read from its
+// codes instead of reconstructed (the refusal of 2026-11-03 left no record). Entries hold method, path, status,
+// timing, request id and error codes: no token, no session id, no cell content.
+const REQUEST_LOG_MAX = 500;
+const requestLog = [];
+function logRequest(e) {
+  requestLog.push({ at: new Date().toISOString(), ...e });
+  if (requestLog.length > REQUEST_LOG_MAX) requestLog.shift();
+}
+function requestLogText() { return requestLog.map(e => `${e.at} ${describeLogEntry(e)}`).join('\n'); }
+
 // ---- boot --------------------------------------------------------------------------------
 async function main() {
   $('#app-version').textContent = `v${CONFIG.appVersion}`;
@@ -54,7 +66,8 @@ async function main() {
     try { const saved = sessionStorage.getItem(MOCK_STATE_KEY); if (saved) mock.importState(JSON.parse(saved)); } catch { /* fresh sample */ }
     mock.onChange = m => { try { sessionStorage.setItem(MOCK_STATE_KEY, JSON.stringify(m.exportState())); } catch { /* ignore */ } };
     window.__tpahaMock = mock;
-    state.client = new ExcelClient({ getToken: async () => 'test-mode', driveId: 'TEST', itemId: 'TEST', fetchImpl: (u, o) => mock.fetch(u, o) });
+    window.__tpahaRequestLog = requestLogText;
+    state.client = new ExcelClient({ getToken: async () => 'test-mode', driveId: 'TEST', itemId: 'TEST', fetchImpl: (u, o) => mock.fetch(u, o), log: logRequest });
     state.workbook = { driveId: 'TEST', itemId: 'TEST', name: mock.name, source: 'test' };
     state.who = { tenantId: 'test', homeAccountId: 'test-user', app: 'ledger' };
     showBanner('Test mode: in-memory copy of the workbook with made-up figures. Nothing is saved to Microsoft 365.');
@@ -64,7 +77,7 @@ async function main() {
     state.who = { tenantId: state.auth.tenantId || state.auth.account.tenantId || 'tenant', homeAccountId: state.auth.account.homeAccountId || state.auth.account.username, app: 'ledger' };
     state.workbook = resolveConfigured(CONFIG, 'ledger') || recallWorkbook(localStorage, state.who);
     if (!state.workbook) { await showPicker(); return; }
-    state.client = new ExcelClient({ getToken: state.auth.getToken, driveId: state.workbook.driveId, itemId: state.workbook.itemId });
+    state.client = new ExcelClient({ getToken: state.auth.getToken, driveId: state.workbook.driveId, itemId: state.workbook.itemId, log: logRequest });
   }
   state.wb = new LedgerWorkbook(state.client);
   const ids = { tenantId: state.who.tenantId, homeAccountId: state.who.homeAccountId, workbookId: workbookKey(state.workbook) };
@@ -250,6 +263,10 @@ function saveStateText(c) {
       const e = c.error || {};
       const retry = e.retryAfter ? ` Microsoft asked to wait ${e.retryAfter} s before trying again.` : '';
       if (c.incomplete) return `Not finished: ${e.message}`;
+      if (c.checkFailed) {
+        const again = c.checkFailed.blocked ? 'Reload the page, then press "Check workbook" again: this page stopped sending requests after that session error.' : 'Press "Check workbook" to read again.';
+        return `Could not check the workbook: ${c.checkFailed.message || 'unknown error'} Your earlier save attempt remains unconfirmed; the check wrote nothing. ${again}`;
+      }
       return c.needsVerification
         ? `Could not save: the answer from Microsoft was lost, so this may or may not be in the workbook.${retry} Press "Check workbook" (reads only) or Save: the page checks the workbook before it writes anything.`
         : `Could not save: ${e.message || 'unknown error'}${retry}`;
@@ -936,6 +953,43 @@ function buildSettings() {
     forgetWorkbook(localStorage, state.who);
     location.reload();
   });
+  $('#btn-copy-log').addEventListener('click', async () => {
+    const text = requestLogText();
+    if (!text) { toast('No requests have been made yet.', 'info'); return; }
+    try {
+      if (!navigator.clipboard || !navigator.clipboard.writeText) throw new Error('no clipboard');
+      await navigator.clipboard.writeText(text);
+      toast(`Request log copied (${requestLog.length} entries).`);
+    } catch {
+      // The log lives on this page only (Diagnostics keeps its own), so it must stay reachable here.
+      showRequestLog(true);
+      const area = $('#request-log-text');
+      area.focus();
+      area.select();
+      toast('Could not copy automatically. The log is shown below: it is selected, so copy it from there, or download it.', 'error');
+    }
+  });
+  $('#btn-show-log').addEventListener('click', () => showRequestLog($('#request-log-panel').hidden));
+}
+let requestLogUrl = null;
+/** Shows (or hides) the request log on the page with the download link pointing at the same text. */
+function showRequestLog(show) {
+  const panel = $('#request-log-panel');
+  const btn = $('#btn-show-log');
+  if (!show) { panel.hidden = true; btn.textContent = 'Show request log'; btn.setAttribute('aria-expanded', 'false'); return; }
+  const text = requestLogText();
+  $('#request-log-text').value = text || '(no requests have been made yet)';
+  const link = $('#btn-download-log');
+  try {
+    if (requestLogUrl) URL.revokeObjectURL(requestLogUrl);
+    requestLogUrl = URL.createObjectURL(new Blob([text], { type: 'text/plain;charset=utf-8' }));
+    link.href = requestLogUrl;
+    link.download = `tpaha-request-log-${new Date().toISOString().replace(/[:.]/g, '-').slice(0, 16)}.txt`;
+    link.hidden = false;
+  } catch { link.hidden = true; }
+  panel.hidden = false;
+  btn.textContent = 'Hide request log';
+  btn.setAttribute('aria-expanded', 'true');
 }
 function renderSettings() {
   const form = $('#settings-form');

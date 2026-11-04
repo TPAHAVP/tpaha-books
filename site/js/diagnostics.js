@@ -3,7 +3,7 @@
 // (review finding T2): a second TPAHA Books tab in this browser can read here but never runs the write test.
 import { CONFIG } from './config.js';
 import { initAuth } from './auth.js';
-import { ExcelClient } from './workbook/excel-client.js';
+import { ExcelClient, describeLogEntry } from './workbook/excel-client.js';
 import { MockWorkbook } from './workbook/mock-excel.js';
 import { SAMPLE_WORKBOOK } from './workbook/sample-workbook.js';
 import { LedgerWorkbook, LOG_COLUMNS, isBlankRow, sortedTableMatches } from './workbook/ledger-workbook.js';
@@ -18,7 +18,7 @@ const state = { auth: null, mode: 'test', mock: null, client: null, wb: null, ch
 
 function logRequest(e) {
   state.requests.push(e);
-  const li = h('li', {}, e.event ? `session ${e.id}` : `${e.method} ${e.path} → ${e.status || 'network error'} (${e.ms} ms)${e.requestId ? ' request-id ' + e.requestId : ''}${e.code ? ' code ' + e.code : ''}${e.innerCode ? ' inner ' + e.innerCode : ''}${e.error ? ' — ' + e.error : ''}`);
+  const li = h('li', {}, describeLogEntry(e));
   $('#request-log').append(li);
 }
 

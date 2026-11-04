@@ -51,8 +51,10 @@ Row identity used by the app = TransactionID + Timestamp. Row fingerprint = all 
 
 All calls go through one persistent Graph workbook session (`workbook-session-id`), one request
 at a time from one page, and every write is followed by a read-back before the app reports "Saved".
-Reads may be retried once (network loss, 429/503/504 with `Retry-After`, expired session). **Writes are
-sent exactly once**; when the answer to a write is lost the operation is reported as uncertain and is
+Reads may be retried once (network loss, 429/503/504 with `Retry-After`, a session Microsoft calls
+re-creatable: second-level code `invalidSessionReCreatable`, which is also what a session paused for
+inactivity returns, wrapped in a third level). Any other session error stops the page from sending anything
+until it is reloaded. **Writes are sent exactly once**; when the answer to a write is lost the operation is reported as uncertain and is
 resolved by reading (§3b), never by sending it again automatically. **Every positional request (a
 DELETE of `rows/$/itemAt(index=n)`, a PATCH of `rows/itemAt(index=n)/range`) is preceded by a fresh read that is evaluated
 before the request is sent**: the row at that index must be exactly the intended row (identity and

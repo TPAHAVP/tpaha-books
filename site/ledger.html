@@ -95,7 +95,16 @@
       <div id="workbook-info" class="small"></div>
       <div class="row" style="margin-top:.5rem">
         <button type="button" id="btn-change-workbook" class="btn btn-sm" hidden>Choose a different workbook</button>
+        <button type="button" id="btn-copy-log" class="btn btn-sm" title="Every request this page made to Microsoft 365: method, path, status, timing, request id and error codes. No sign-in token, session id or record content.">Copy request log</button>
+        <button type="button" id="btn-show-log" class="btn btn-sm" aria-expanded="false" aria-controls="request-log-panel">Show request log</button>
         <a class="btn btn-sm" href="diagnostics.html">Diagnostics</a>
+      </div>
+      <div id="request-log-panel" class="request-log" hidden>
+        <p class="small">This page's requests to Microsoft 365, oldest first. Select the text to copy it, or download it as a file. No sign-in token, session id or record content is included.</p>
+        <textarea id="request-log-text" class="request-log-text" readonly rows="10" spellcheck="false" aria-label="Request log"></textarea>
+        <div class="row" style="margin-top:.5rem">
+          <a id="btn-download-log" class="btn btn-sm" href="#" download="tpaha-request-log.txt">Download request log</a>
+        </div>
       </div>
     </div>
     <div class="card" id="account-card">
