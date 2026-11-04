@@ -38,7 +38,19 @@ permission touched:
 - Not covered by automation: a real sign-in on a fresh device and on the device that remembers the test copy;
   that is the live check after publishing (the published page will open `TPAHA_2026.xlsx`, not the test copy).
 
-Diff for review: `data/review/2026-11-03-pinned-workbook.diff` (git-ignored). Unpublished.
+Diff that was reviewed: `data/review/2026-11-03-pinned-workbook.diff` (git-ignored).
+**Published, 2026-11-03 night (reviewer's go-ahead): `5e46853`.** Part 0: 0.1 unit 183 / browser 222 /
+verify:config 30, all passing (the unreviewed 2026-11-02 documentation again left uncommitted on purpose). 0.2 one
+commit, nine files, private-file check empty. 0.3 pushed `34d0a6d..5e46853`. 0.4 Pages run 41759597632 completed
+with success. 0.5 the served `config.js`, `ledger/app.js`, `locate.js`, `ledger.html`, `excel-client.js` and `sw.js`
+each hash to their committed blob (fetched with `?nocache=`); the served `config.js` names `TPAHA_2026.xlsx` with
+the pinned drive and item ids, `allowWorkbookPicker: false` and `appVersion: '2026.11.03'`; the served page has no
+`btn-change-workbook` and the served app has no search, picker or candidates code and does carry the start-up
+resolver and the access-error card. No sign-in from here; no workbook or permission touched. Next, Cody's: open
+the page on the existing browser (the device that remembers the test copy) and on the phone and confirm it opens
+`TPAHA_2026.xlsx` automatically; a device that has opened the site before may need a second load or a hard
+refresh, because the service worker serves scripts cache-first until the new version's cache is installed.
+
 
 ---
 
