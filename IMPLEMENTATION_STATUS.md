@@ -38,6 +38,42 @@ may be removed. Entra first, then publish, or every member is sent to a consent 
 
 ---
 
+## 2026-11-05 — Secretary's `403 accessDenied` on the pinned workbook: **investigated; scope and wording fix reviewed and published**
+
+Reported: the secretary can open `TPAHA_2026.xlsx` in Excel but the published page answers `HTTP 403 · code
+accessDenied · request-id 39e4acf2-…`. The workbook lives in the Vice President's OneDrive and the page reaches
+it as `/drives/{driveId}/items/{itemId}` with the delegated scope `Files.ReadWrite`, which Microsoft defines as
+"the signed-in user's files"; `Files.ReadWrite.All` is "all files the signed-in user can access", and the
+sharedWithMe reference says shared items cannot be accessed without a `*.All` permission. Evidence, sources and
+the exact Entra change are in `docs/incident-2026-11-05-secretary-403.md`. Nothing published, no Entra
+permission or consent changed, no workbook touched. Local changes:
+
+- `site/js/auth.js`: scopes `Files.ReadWrite.All` + `User.Read` (still delegated, single tenant, redirect flow;
+  the pin and the account restrictions unchanged).
+- `site/js/workbook/locate.js`: the 403 wording no longer asserts that the member lacks sharing permission; it
+  names the refusal and both possible causes (site sign-in permission not reaching another member's OneDrive,
+  even when Excel opens the file; or the workbook not shared) and says nothing was changed.
+- `tools/verify-config.mjs`: expects the new scope pair and checks that `Files.ReadWrite.All` is requested and the
+  narrower `Files.ReadWrite`/`Files.Read` are not (32 checks).
+- `site/js/config.js`: `appVersion` 2026.11.05 (cached `auth.js` must be refetched); registration comment.
+  `docs/setup-guide.md`: step B6 and the permission section rewritten for `Files.ReadWrite.All`.
+- Tests written first and watched fail: `tests/unit/pinned-workbook.test.js` (403 wording), `tests/e2e/pinned-workbook.spec.js`.
+- Results: unit 183/183; `verify:config` 32/32; Playwright pinned-workbook 9/9 (desktop, iphone, iphone-webkit);
+  full Playwright suite 222/222.
+
+Needed in Entra before publishing (Cody's decision, not done): App registrations → TPAHA Books → API permissions
+→ add delegated Microsoft Graph `Files.ReadWrite.All` → Grant admin consent for TPAHA; afterwards `Files.ReadWrite`
+may be removed. Entra first, then publish, or every member is sent to a consent prompt.
+
+**Published 2026-11-05 (evening) as `f66e0fb`** after Cody granted admin consent for delegated `Files.ReadWrite.All`
+in Entra (Codex paused; no other permission or consent change; `Files.ReadWrite` left in place until this
+release was confirmed). Pages run 42155855130 succeeded; served `auth.js`, `config.js`, `locate.js`, `ledger/app.js`,
+`excel-client.js`, `ledger.html` and `sw.js` hash-equal to the committed blobs; served scope
+`Files.ReadWrite.All` + `User.Read`, pin unchanged, no picker, `appVersion` 2026.11.05, old 403 wording absent.
+Pending: the secretary signs out of the site and back in to test access (result to be recorded here).
+
+---
+
 ## 2026-11-03 (late) — Ledger page pinned to the club workbook `TPAHA_2026.xlsx`: **implemented locally with tests, unpublished, for review**
 
 Requested after the session fix was published: the published treasurer page is to open the real club workbook
