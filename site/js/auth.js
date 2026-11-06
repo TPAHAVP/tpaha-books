@@ -1,5 +1,10 @@
 // Sign-in wrapper around the vendored MSAL UMD build (window.msal). An empty clientId means local mode.
-const SCOPES = ['Files.ReadWrite', 'User.Read'];
+// Files.ReadWrite.All (not Files.ReadWrite) since 2026-11-05: the club workbook lives in one member's OneDrive and
+// every other member reaches it by drive id. Microsoft defines delegated Files.ReadWrite as "the signed-in user's
+// files" and Files.ReadWrite.All as "all files the signed-in user can access"; with the narrower scope Graph answered
+// 403 accessDenied for a member who could open the same file in Excel. Still delegated: the site acts only as the
+// signed-in member and can open nothing that member cannot open in OneDrive themselves.
+const SCOPES = ['Files.ReadWrite.All', 'User.Read'];
 
 export async function initAuth(config) {
   if (!config.clientId) {

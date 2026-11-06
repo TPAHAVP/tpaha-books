@@ -24,7 +24,9 @@ const servedLocally = typeof location === 'undefined' || LOCAL_HOSTS.has(locatio
 
 // Entra app registration "TPAHA Books", completed 2026-09-11: single tenant; platform Single-page application
 // with redirect URI https://tpahavp.github.io/tpaha-books/ (the site root, which is what js/auth.js derives);
-// delegated Microsoft Graph User.Read and Files.ReadWrite with admin consent granted; "Assignment required"
+// delegated Microsoft Graph User.Read and Files.ReadWrite.All (Files.ReadWrite until 2026-11-05, which Microsoft
+// defines as the signed-in user's own files and which refused the workbook in another member's OneDrive with
+// 403 accessDenied) with admin consent granted; "Assignment required"
 // set to Yes with only the intended accounts assigned; implicit grant unchecked; public client flows disabled;
 // no client secret and no certificate.
 const ENTRA = {
@@ -61,6 +63,6 @@ export const CONFIG = {
     writerModel: 'single',
     note: 'Pilot: one designated writer at a time. Do not use this page in two tabs or on two devices, and do not edit the workbook in Excel or run its script buttons while it is in use. Simultaneous editing is not supported.',
   },
-  appVersion: '2026.11.03',       // change on every release: the service worker caches by this value
+  appVersion: '2026.11.05',       // change on every release: the service worker caches by this value
   siteName: 'TPAHA Books',
 };

@@ -49,15 +49,24 @@ test('no pinned workbook: nothing is opened and nothing is remembered or searche
   assert.equal(r.replaced, null);
 });
 
-test('describeAccessFailure: 403 is an access problem for this account, named and with the ids kept out', () => {
+// 2026-11-05: the secretary could open the workbook in Excel yet the page got 403 accessDenied. A 403 from Graph
+// can mean the site's sign-in permission does not reach a workbook in another member's OneDrive, not only that
+// the workbook is unshared, so the wording must not assert that the member lacks sharing permission.
+test('describeAccessFailure: 403 names the refusal and both possible causes, never asserting the member is unshared', () => {
   const t = describeAccessFailure({ status: 403, code: 'AccessDenied', innerCode: 'accessDenied', message: 'Access denied', requestId: 'req-1' }, 'TPAHA_2026.xlsx');
   assert.match(t.title, /Could not open TPAHA_2026\.xlsx/);
-  assert.match(t.reason, /does not have access/i);
+  assert.match(t.reason, /refused|access denied/i, 'states what Microsoft 365 did');
+  assert.match(t.reason, /permission/i, 'names the site sign-in permission as a possible cause');
+  assert.match(t.reason, /Excel/, 'says this can happen even when Excel opens the file');
+  assert.match(t.reason, /shared/i, 'sharing remains a possible cause');
+  assert.doesNotMatch(t.reason, /does not have access|has been withdrawn|Ask the treasurer to share/i, 'no assertion that the member lacks sharing permission');
   assert.match(t.detail, /403/);
   assert.match(t.detail, /accessDenied/);
   assert.match(t.detail, /req-1/);
   assert.match(t.scope, /does not search for other copies/i);
   assert.doesNotMatch(JSON.stringify(t), /b!|01ITEM/, 'no drive or item id in the wording');
+  // The same wording when only the code says access was denied.
+  assert.equal(describeAccessFailure({ code: 'accessDenied', message: 'Access denied' }, 'TPAHA_2026.xlsx').reason, t.reason);
 });
 
 test('describeAccessFailure: 404 says the configured workbook was not found; other failures state status and code', () => {

@@ -106,7 +106,10 @@ export function describeAccessFailure(err, name) {
   const code = String(e.innerCode || e.code || '');
   const message = e.message ? String(e.message) : '';
   let reason;
-  if (status === 403 || /accessDenied|forbidden|unauthenticated/i.test(code)) reason = `Your Microsoft account does not have access to this workbook, or the access has been withdrawn. Ask the treasurer to share ${name || 'the workbook'} with you, then try again.`;
+  // A 403 is not proof that the workbook is unshared: Graph also refuses when the permission the site signed in
+  // with does not reach a file in another member's OneDrive (seen 2026-11-05 for a member who could open the
+  // file in Excel). Name both causes; assert neither.
+  if (status === 403 || /accessDenied|forbidden|unauthenticated/i.test(code)) reason = `Microsoft 365 refused this page's request to open ${name || 'the workbook'} (access denied). That happens when the permission the site signs in with does not reach a workbook kept in another member's OneDrive, even if you can open the same file in Excel, or when the workbook is not shared with your account. Nothing was changed. Tell the treasurer and quote the details below.`;
   else if (status === 401) reason = 'Your sign-in is no longer valid. Sign out, sign in again, then try again.';
   else if (status === 404 || /itemNotFound|notFound/i.test(code)) reason = `The configured workbook was not found where the site expects it. It may have been moved, renamed or deleted. Nothing has been changed; tell the treasurer before doing anything else.`;
   else if (status === 0) reason = `Microsoft 365 could not be reached (${message || 'network problem'}). Check the connection and try again.`;

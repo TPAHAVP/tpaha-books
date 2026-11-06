@@ -33,12 +33,14 @@ Alternatives with the same properties: Cloudflare Pages or Netlify (both free fo
 3. Name: `TPAHA Books`. Supported account types: **Accounts in this organizational directory only (TPAHA only – Single tenant)**.
 4. Redirect URI: platform **Single-page application (SPA)**, value = the site address from part A (with trailing slash). Add a second one later for a custom domain if you adopt one. Click **Register**.
 5. On the Overview page copy two values for part D: **Application (client) ID** and **Directory (tenant) ID**. These are identifiers, not secrets.
-6. **API permissions → Add a permission → Microsoft Graph → Delegated permissions**: tick `Files.ReadWrite` and `User.Read`, then **Add permissions**. Then click **Grant admin consent for TPAHA** so members are not each asked to consent.
+6. **API permissions → Add a permission → Microsoft Graph → Delegated permissions**: tick `Files.ReadWrite.All` and `User.Read`, then **Add permissions**. Then click **Grant admin consent for TPAHA** so members are not each asked to consent. (Until 2026-11-05 the registration carried `Files.ReadWrite`; see the next section for why that was not enough. Once `Files.ReadWrite.All` is consented, remove `Files.ReadWrite` so the registration lists exactly what the site requests.)
 7. **Never create a client secret or certificate for this app.** The site runs entirely in the member's browser and does not need one; a secret in a web page would be public.
 
-### What `Files.ReadWrite` means, honestly
+### What `Files.ReadWrite.All` means, honestly
 
-It is the least-privileged permission Microsoft lists for the Excel workbook API. It lets the site, *while a member is signed in and only as that member*, read and change files that this member can already open in OneDrive or SharePoint. It does not grant access to anyone else's files and it grants nothing when nobody is signed in. The site only ever uses it on the one workbook the member has confirmed on the Diagnostics page or that is pinned in the configuration. There is no narrower delegated permission that still allows writing to an Excel table.
+It is a *delegated* permission: the site acts only *while a member is signed in and only as that member*, and can read and change only files that this member can already open in OneDrive or SharePoint. It grants nothing when nobody is signed in and never reaches a file the member could not open in Excel themselves. The site only ever uses it on the one workbook pinned in the configuration (or confirmed on the Diagnostics page).
+
+Why `.All` and not plain `Files.ReadWrite`: Microsoft defines delegated `Files.ReadWrite` as access to "the signed-in user's files", meaning the member's own OneDrive, and `Files.ReadWrite.All` as "all files the signed-in user can access", which is what a file kept in *another* member's OneDrive and shared with them is. The club workbook lives in one member's OneDrive and every other member reaches it by drive id. On 2026-11-05, with `Files.ReadWrite`, Microsoft Graph answered `403 accessDenied` for the secretary, who could open the very same workbook in Excel. The word "All" describes the reach of the *member's* existing access, not a licence to everything in the tenant; the application-only permission of the same name is a different thing and is not used. There is no narrower delegated permission that reaches a shared workbook and still allows writing to an Excel table.
 
 ## C. Restrict sign-in to approved board accounts
 
@@ -81,7 +83,8 @@ Microsoft.
 `workbooks.ledger` is pinned to the club workbook, `TPAHA_2026.xlsx` (drive id and item id as shown on the Diagnostics page; done 2026-11-03). The published ledger page opens that file for every member on every device as soon as they have signed in; it has no picker and no "choose a different workbook", a copy a device remembered from the earlier picker is ignored and cleared, and when the file cannot be opened the page shows the access error (status, code, request id) and stops rather than searching for other copies. Locally served pages keep blank ids and the in-memory sample, so the automated tests never touch the club workbook. `npm run verify:config` checks the pinned ids. The Diagnostics page keeps its own search for comparing copies.
 
 Commit and push. Pages redeploys within a couple of minutes. Change `appVersion` whenever you deploy so phones
-pick up the new files; it was `2026.09.11` for that change and is `2026.11.03` for the pinned workbook.
+pick up the new files; it was `2026.09.11` for that change, `2026.11.03` for the pinned workbook and `2026.11.05` for the
+`Files.ReadWrite.All` scope (members' browsers cache `auth.js`, so the scope change needs a new version to reach them).
 
 **What publishing this change does.** Until it is pushed, the live site is a harmless test-mode page. Once it
 is, the published site asks assigned members to sign in and can read and write the workbook they choose. That

@@ -17,7 +17,10 @@ const EXPECTED = {
   clientId: '6c5bf2f8-a50c-4908-ba93-535816364785',
   tenantId: 'ef5ad4e3-2b18-4542-8fd2-ed7212cbcc93',
   site: 'https://tpahavp.github.io/tpaha-books/',
-  scopes: ['Files.ReadWrite', 'User.Read'],
+  // Delegated scopes. Files.ReadWrite.All since 2026-11-05: the pinned workbook lives in another member's OneDrive
+  // and is addressed by drive id, which Microsoft's permissions reference puts under "all files the signed-in user
+  // can access" (Files.ReadWrite.All), not "the signed-in user's files" (Files.ReadWrite).
+  scopes: ['Files.ReadWrite.All', 'User.Read'],
   // The club's treasurer workbook, pinned 2026-11-03. Change these only when the club moves to another file.
   ledger: {
     name: 'TPAHA_2026.xlsx',
@@ -65,6 +68,8 @@ for (const page of ['index.html', 'ledger.html', 'diagnostics.html', 'storage.ht
 const auth = readFileSync(join(root, 'site/js/auth.js'), 'utf8');
 const scopes = /const SCOPES = \[([^\]]*)\]/.exec(auth)[1].replace(/['\s]/g, '').split(',').sort();
 check('Requests exactly the consented delegated scopes', JSON.stringify(scopes) === JSON.stringify([...EXPECTED.scopes].sort()), scopes.join(', '));
+check("Requests Files.ReadWrite.All, the delegated scope that reaches a workbook in another member's drive", scopes.includes('Files.ReadWrite.All'));
+check('Does not request the narrower Files.ReadWrite alongside it', !scopes.includes('Files.ReadWrite') && !scopes.includes('Files.Read'));
 check('Authority is the single tenant, not /common or /organizations', auth.includes('login.microsoftonline.com/${config.tenantId'));
 check('Sign-in is redirect-based, so no implicit-grant or popup token flow is needed', auth.includes('loginRedirect') && !auth.includes('loginPopup'));
 

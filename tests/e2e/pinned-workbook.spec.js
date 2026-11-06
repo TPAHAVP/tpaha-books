@@ -18,7 +18,7 @@ test('the Settings tab offers no way to choose or change the workbook', async ({
 // The failure is injected on the session request, the first one the page cannot do without (the item-metadata
 // read that precedes it is a courtesy the workbook tolerates losing).
 for (const [label, failure, reason] of [
-  ['refused with 403', { match: 'createSession', status: 403, code: 'AccessDenied', innerCode: ['accessDenied'], message: 'Access denied' }, /does not have access/i],
+  ['refused with 403', { match: 'createSession', status: 403, code: 'AccessDenied', innerCode: ['accessDenied'], message: 'Access denied' }, /refused .* \(access denied\)/i],
   ['not found (404)', { match: 'createSession', status: 404, code: 'itemNotFound', innerCode: ['itemNotFound'], message: 'The resource could not be found.' }, /not found|moved|renamed|deleted/i],
 ]) {
   test(`when the configured workbook is ${label} on the first read, the page shows an access error and searches for nothing`, async ({ page }) => {
@@ -36,6 +36,7 @@ for (const [label, failure, reason] of [
     await expect(gate).toContainText(reason);
     await expect(gate).toContainText(String(failure.status));
     await expect(gate).toContainText('does not search for other copies');
+    await expect(gate).not.toContainText(/does not have access|Ask the treasurer to share/i);
     await expect(page.locator('#tabs')).toBeHidden();
     expect(await page.locator('#candidates, .btn-choose, #btn-change-workbook').count()).toBe(0);
     await expect(page.locator('#btn-retry')).toBeVisible();
